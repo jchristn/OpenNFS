@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Internal XDR parsing and code-generation tooling for OpenNFS.</Description>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="xdrgen.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

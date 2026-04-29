@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Public server hosting surface for OpenNFS.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenNFS.Server</PackageId>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Title>OpenNFS.Server</Title>
+    <PackageTags>nfs;server;onc-rpc</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\LICENSE.md" Pack="true" PackagePath="" Link="LICENSE.md" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
+  </ItemGroup>
+</Project>

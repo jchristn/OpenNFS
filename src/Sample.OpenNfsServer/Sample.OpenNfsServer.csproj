@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Sample server application for exercising OpenNFS host capabilities.</Description>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <ProjectReference Include="..\OpenNFS.Server\OpenNFS.Server.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="appsettings.sample.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

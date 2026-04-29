@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Internal NFSv4.0 protocol implementation for OpenNFS.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
+    <ProjectReference Include="..\OpenNFS.Server\OpenNFS.Server.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Public client surface for OpenNFS.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>OpenNFS.Client</PackageId>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Title>OpenNFS.Client</Title>
+    <PackageTags>nfs;client;onc-rpc</PackageTags>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeProjectReferenceBuildOutputInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
+    <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\LICENSE.md" Pack="true" PackagePath="" Link="LICENSE.md" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
+  </ItemGroup>
+  <Target Name="IncludeProjectReferenceBuildOutputInPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths)"
+                            Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference'
+                              and ( '%(ReferenceCopyLocalPaths.Extension)' == '.dll'
+                                or '%(ReferenceCopyLocalPaths.Extension)' == '.xml' )" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,63 @@
+#pragma warning disable CS1591
+namespace OpenNFS.Client
+{
+    /// <summary>
+    /// NFSv4.0 status codes surfaced by grouped client reply models.
+    /// </summary>
+    public enum OpenNfsV40Status
+    {
+        Ok = 0,
+        PermissionDenied = 1,
+        NoEnt = 2,
+        Io = 5,
+        AccessDenied = 13,
+        Exists = 17,
+        CrossDevice = 18,
+        NotDirectory = 20,
+        IsDirectory = 21,
+        Invalid = 22,
+        TooManyLinks = 31,
+        NameTooLong = 63,
+        NotEmpty = 66,
+        Stale = 70,
+        BadHandle = 10001,
+        BadCookie = 10003,
+        NotSupported = 10004,
+        TooSmall = 10005,
+        ServerFault = 10006,
+        BadType = 10007,
+        Delay = 10008,
+        Same = 10009,
+        Denied = 10010,
+        Expired = 10011,
+        Locked = 10012,
+        Grace = 10013,
+        FileHandleExpired = 10014,
+        ShareDenied = 10015,
+        ClidInUse = 10017,
+        Resource = 10018,
+        NoFileHandle = 10020,
+        MinorVersionMismatch = 10021,
+        StaleClientId = 10022,
+        StaleStateId = 10023,
+        OldStateId = 10024,
+        BadStateId = 10025,
+        BadSeqId = 10026,
+        FileTooLarge = 27,
+        NoSpace = 28,
+        LockRange = 10028,
+        Symlink = 10029,
+        ReadOnlyFileSystem = 30,
+        RestoreFileHandle = 10030,
+        AttributeNotSupported = 10032,
+        NoGrace = 10033,
+        ReclaimBad = 10034,
+        LocksHeld = 10037,
+        OpenMode = 10038,
+        BadXdr = 10036,
+        BadName = 10041,
+        OperationIllegal = 10044,
+        FileOpen = 10046,
+    }
+}
+#pragma warning restore CS1591

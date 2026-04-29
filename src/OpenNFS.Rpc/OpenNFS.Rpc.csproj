@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Internal ONC RPC, XDR, transport, auth, and replay primitives for OpenNFS.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

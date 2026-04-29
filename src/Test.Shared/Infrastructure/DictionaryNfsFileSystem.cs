@@ -1,0 +1,679 @@
+namespace Test.Shared.Infrastructure
+{
+    using System;
+    using System.Collections.Generic;
+    using System.IO;
+    using System.Text;
+    using System.Threading.Tasks;
+    using OpenNFS.Server;
+    using OpenNFS.Server.Abstractions;
+    using OpenNFS.Server.Requests;
+    using OpenNFS.Server.Responses;
+
+    internal sealed class DictionaryNfsFileSystem : INfsFileSystem
+    {
+        private static readonly DateTimeOffset TimestampBaseUtc = new DateTimeOffset(2026, 01, 01, 00, 00, 00, TimeSpan.Zero);
+        private readonly Dictionary<string, byte[]> _FileContents;
+        private readonly Dictionary<string, NfsPathKind> _PathKinds;
+        private readonly Dictionary<string, PathTimestamps> _PathTimestamps;
+        private readonly Dictionary<string, string> _SymbolicLinkTargets;
+        private readonly List<string> _RequestedPaths = new List<string>();
+        private long _nextTimestampTicks;
+
+        internal DictionaryNfsFileSystem(
+            IReadOnlyDictionary<string, NfsPathKind> pathKinds,
+            IReadOnlyDictionary<string, byte[]>? fileContents = null,
+            IReadOnlyDictionary<string, string>? symbolicLinkTargets = null)
+        {
+            ArgumentNullException.ThrowIfNull(pathKinds);
+            _PathKinds = new Dictionary<string, NfsPathKind>(pathKinds, StringComparer.OrdinalIgnoreCase);
+            _FileContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            _PathTimestamps = new Dictionary<string, PathTimestamps>(StringComparer.OrdinalIgnoreCase);
+            _SymbolicLinkTargets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _nextTimestampTicks = TimestampBaseUtc.UtcTicks;
+
+            if (fileContents is not null)
+            {
+                foreach (KeyValuePair<string, byte[]> fileContent in fileContents)
+                {
+                    ArgumentNullException.ThrowIfNull(fileContent.Value);
+                    _FileContents.Add(fileContent.Key, fileContent.Value.AsSpan().ToArray());
+                }
+            }
+
+            if (symbolicLinkTargets is null)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<string, string> symbolicLinkTarget in symbolicLinkTargets)
+            {
+                ArgumentException.ThrowIfNullOrWhiteSpace(symbolicLinkTarget.Value);
+                _SymbolicLinkTargets.Add(symbolicLinkTarget.Key, symbolicLinkTarget.Value);
+            }
+
+            List<string> initialPaths = new List<string>(_PathKinds.Keys);
+            initialPaths.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (string initialPath in initialPaths)
+            {
+                EnsureTimestampForExistingPath(initialPath);
+            }
+        }
+
+        internal IReadOnlyList<string> RequestedPaths
+        {
+            get
+            {
+                return _RequestedPaths;
+            }
+        }
+
+        internal int WriteRequestCount { get; private set; }
+
+        public Task<NfsGetPathInfoResponse> GetPathInfoAsync(NfsGetPathInfoRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.SourcePath);
+            return Task.FromResult(new NfsGetPathInfoResponse(GetPathInfo(request.SourcePath)));
+        }
+
+        public Task<NfsLookupPathResponse> LookupPathAsync(NfsLookupPathRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string resolvedSourcePath = Path.Combine(request.DirectorySourcePath, request.EntryName);
+            _RequestedPaths.Add(resolvedSourcePath);
+            return Task.FromResult(new NfsLookupPathResponse(GetPathInfo(resolvedSourcePath)));
+        }
+
+        public Task<NfsReadDirectoryResponse> ReadDirectoryAsync(NfsReadDirectoryRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.DirectorySourcePath);
+
+            List<NfsDirectoryEntryInfo> entries = new List<NfsDirectoryEntryInfo>();
+            string normalizedDirectoryPath = NormalizePath(request.DirectorySourcePath);
+
+            foreach (KeyValuePair<string, NfsPathKind> pathKind in _PathKinds)
+            {
+                string? parentDirectory = Path.GetDirectoryName(pathKind.Key);
+                if (!string.Equals(NormalizePath(parentDirectory), normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string childName = Path.GetFileName(pathKind.Key);
+                entries.Add(new NfsDirectoryEntryInfo(childName, GetPathInfo(pathKind.Key)));
+            }
+
+            entries.Sort(static (left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name));
+            return Task.FromResult(new NfsReadDirectoryResponse(entries));
+        }
+
+        public Task<NfsReadFileResponse> ReadFileAsync(NfsReadFileRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.SourcePath);
+
+            if (!GetPathInfo(request.SourcePath).Exists)
+            {
+                return Task.FromResult(new NfsReadFileResponse(Array.Empty<byte>(), endOfFile: true, found: false));
+            }
+
+            if (!_FileContents.TryGetValue(request.SourcePath, out byte[]? fileContents))
+            {
+                return Task.FromResult(new NfsReadFileResponse(Array.Empty<byte>(), endOfFile: true));
+            }
+
+            if (request.Offset >= (ulong)fileContents.Length)
+            {
+                return Task.FromResult(new NfsReadFileResponse(Array.Empty<byte>(), endOfFile: true));
+            }
+
+            int startOffset = checked((int)request.Offset);
+            int remainingByteCount = fileContents.Length - startOffset;
+            int requestedByteCount = request.Count > int.MaxValue ? int.MaxValue : (int)request.Count;
+            int bytesToRead = Math.Min(remainingByteCount, requestedByteCount);
+            byte[] data = new byte[bytesToRead];
+            Array.Copy(fileContents, startOffset, data, 0, bytesToRead);
+            bool endOfFile = startOffset + bytesToRead >= fileContents.Length;
+            return Task.FromResult(new NfsReadFileResponse(data, endOfFile));
+        }
+
+        public Task<NfsReadSymbolicLinkResponse> ReadSymbolicLinkAsync(NfsReadSymbolicLinkRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.SourcePath);
+
+            NfsPathInfo pathInfo = GetPathInfo(request.SourcePath);
+            if (!pathInfo.Exists || pathInfo.Kind != NfsPathKind.SymbolicLink)
+            {
+                return Task.FromResult(new NfsReadSymbolicLinkResponse(pathInfo, string.Empty));
+            }
+
+            string targetPath = _SymbolicLinkTargets.TryGetValue(request.SourcePath, out string? symbolicLinkTarget)
+                ? symbolicLinkTarget
+                : string.Empty;
+            return Task.FromResult(new NfsReadSymbolicLinkResponse(pathInfo, targetPath));
+        }
+
+        public Task<NfsWriteFileResponse> WriteFileAsync(NfsWriteFileRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.SourcePath);
+            WriteRequestCount++;
+
+            NfsPathInfo currentPathInfo = GetPathInfo(request.SourcePath);
+            if (!currentPathInfo.Exists || currentPathInfo.Kind != NfsPathKind.File)
+            {
+                return Task.FromResult(new NfsWriteFileResponse(currentPathInfo, 0, request.Stability));
+            }
+
+            byte[] data = request.Data.ToArray();
+            if (data.Length == 0)
+            {
+                return Task.FromResult(new NfsWriteFileResponse(currentPathInfo, 0, request.Stability));
+            }
+
+            byte[] existingFileContents = _FileContents.TryGetValue(request.SourcePath, out byte[]? fileContents)
+                ? fileContents.AsSpan().ToArray()
+                : Array.Empty<byte>();
+
+            int startOffset = checked((int)request.Offset);
+            int requiredLength = checked(startOffset + data.Length);
+            int finalLength = Math.Max(existingFileContents.Length, requiredLength);
+            byte[] updatedFileContents = new byte[finalLength];
+
+            if (existingFileContents.Length > 0)
+            {
+                Array.Copy(existingFileContents, updatedFileContents, existingFileContents.Length);
+            }
+
+            Array.Copy(data, 0, updatedFileContents, startOffset, data.Length);
+
+            _FileContents[request.SourcePath] = updatedFileContents;
+            _PathKinds[request.SourcePath] = NfsPathKind.File;
+            TouchPath(request.SourcePath);
+
+            return Task.FromResult(
+                new NfsWriteFileResponse(
+                    GetPathInfo(request.SourcePath),
+                    (uint)data.Length,
+                    request.Stability));
+        }
+
+        public Task<NfsCommitFileResponse> CommitFileAsync(NfsCommitFileRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            _RequestedPaths.Add(request.SourcePath);
+            return Task.FromResult(new NfsCommitFileResponse(GetPathInfo(request.SourcePath)));
+        }
+
+        public Task<NfsCreatePathResponse> CreatePathAsync(NfsCreatePathRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            _RequestedPaths.Add(resolvedSourcePath);
+
+            NfsPathInfo currentPathInfo = GetPathInfo(resolvedSourcePath);
+            if (currentPathInfo.Exists)
+            {
+                return Task.FromResult(new NfsCreatePathResponse(currentPathInfo, createdNew: false));
+            }
+
+            switch (request.PathKind)
+            {
+                case NfsPathKind.File:
+                    _PathKinds[resolvedSourcePath] = NfsPathKind.File;
+                    _FileContents[resolvedSourcePath] = Array.Empty<byte>();
+                    break;
+
+                case NfsPathKind.Directory:
+                    _PathKinds[resolvedSourcePath] = NfsPathKind.Directory;
+                    break;
+
+                default:
+                    throw new NotSupportedException("The in-memory test filesystem does not support creating path kind '" + request.PathKind.ToString() + "'.");
+            }
+
+            TouchPath(resolvedSourcePath);
+            TouchParentDirectory(resolvedSourcePath);
+            return Task.FromResult(new NfsCreatePathResponse(GetPathInfo(resolvedSourcePath), createdNew: true));
+        }
+
+        public Task<NfsCreateSymbolicLinkResponse> CreateSymbolicLinkAsync(NfsCreateSymbolicLinkRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            _RequestedPaths.Add(resolvedSourcePath);
+
+            NfsPathInfo currentPathInfo = GetPathInfo(resolvedSourcePath);
+            if (currentPathInfo.Exists)
+            {
+                return Task.FromResult(new NfsCreateSymbolicLinkResponse(currentPathInfo, createdNew: false));
+            }
+
+            _PathKinds[resolvedSourcePath] = NfsPathKind.SymbolicLink;
+            _SymbolicLinkTargets[resolvedSourcePath] = request.TargetPath;
+            TouchPath(resolvedSourcePath);
+            TouchParentDirectory(resolvedSourcePath);
+            return Task.FromResult(new NfsCreateSymbolicLinkResponse(GetPathInfo(resolvedSourcePath), createdNew: true));
+        }
+
+        public Task<NfsCreateHardLinkResponse> CreateHardLinkAsync(NfsCreateHardLinkRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string resolvedDestinationPath = Path.Combine(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
+            _RequestedPaths.Add(request.SourcePath);
+            _RequestedPaths.Add(resolvedDestinationPath);
+
+            NfsPathInfo sourcePathInfo = GetPathInfo(request.SourcePath);
+            if (!sourcePathInfo.Exists)
+            {
+                throw new FileNotFoundException("The source path does not exist.", request.SourcePath);
+            }
+
+            if (sourcePathInfo.Kind != NfsPathKind.File)
+            {
+                throw new NotSupportedException("The in-memory test filesystem only supports hard links for regular files.");
+            }
+
+            if (GetPathInfo(resolvedDestinationPath).Exists)
+            {
+                throw new IOException("The destination path already exists.");
+            }
+
+            byte[] sourceBytes = _FileContents.TryGetValue(request.SourcePath, out byte[]? fileContents)
+                ? fileContents.AsSpan().ToArray()
+                : Array.Empty<byte>();
+
+            _PathKinds[resolvedDestinationPath] = NfsPathKind.File;
+            _FileContents[resolvedDestinationPath] = sourceBytes;
+            TouchPath(request.SourcePath);
+            TouchPath(resolvedDestinationPath);
+            TouchParentDirectory(resolvedDestinationPath);
+            return Task.FromResult(new NfsCreateHardLinkResponse(GetPathInfo(request.SourcePath), GetPathInfo(resolvedDestinationPath)));
+        }
+
+        public Task<NfsDeletePathResponse> DeletePathAsync(NfsDeletePathRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            _RequestedPaths.Add(resolvedSourcePath);
+
+            _PathTimestamps.Remove(resolvedSourcePath);
+            _PathKinds.Remove(resolvedSourcePath);
+            _FileContents.Remove(resolvedSourcePath);
+            _SymbolicLinkTargets.Remove(resolvedSourcePath);
+            TouchParentDirectory(resolvedSourcePath);
+
+            return Task.FromResult(new NfsDeletePathResponse(GetPathInfo(resolvedSourcePath)));
+        }
+
+        public Task<NfsRenamePathResponse> RenamePathAsync(NfsRenamePathRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string sourceSourcePath = Path.Combine(request.SourceParentDirectorySourcePath, request.SourceEntryName);
+            string destinationSourcePath = Path.Combine(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
+            _RequestedPaths.Add(sourceSourcePath);
+            _RequestedPaths.Add(destinationSourcePath);
+
+            if (string.Equals(
+                NormalizePath(sourceSourcePath),
+                NormalizePath(destinationSourcePath),
+                StringComparison.OrdinalIgnoreCase))
+            {
+                NfsPathInfo currentPathInfo = GetPathInfo(sourceSourcePath);
+                return Task.FromResult(new NfsRenamePathResponse(currentPathInfo, currentPathInfo, replacedExistingDestination: false));
+            }
+
+            NfsPathInfo sourcePathInfo = GetPathInfo(sourceSourcePath);
+            if (!sourcePathInfo.Exists)
+            {
+                throw new FileNotFoundException("The source path does not exist.", sourceSourcePath);
+            }
+
+            NfsPathInfo destinationPathInfo = GetPathInfo(destinationSourcePath);
+            bool replacedExistingDestination = destinationPathInfo.Exists;
+
+            if (destinationPathInfo.Exists)
+            {
+                if (!request.ReplaceExistingDestination)
+                {
+                    throw new IOException("The destination path already exists.");
+                }
+
+                if (destinationPathInfo.Kind == NfsPathKind.Directory && HasDirectoryChildren(destinationSourcePath))
+                {
+                    throw new IOException("The destination directory is not empty.");
+                }
+
+                RemovePathAndDescendants(destinationSourcePath);
+            }
+
+            MovePathAndDescendants(sourceSourcePath, destinationSourcePath);
+            TouchPath(destinationSourcePath);
+            TouchParentDirectory(sourceSourcePath);
+            TouchParentDirectory(destinationSourcePath);
+
+            return Task.FromResult(
+                new NfsRenamePathResponse(
+                    GetPathInfo(sourceSourcePath),
+                    GetPathInfo(destinationSourcePath),
+                    replacedExistingDestination));
+        }
+
+        private NfsPathInfo GetPathInfo(string sourcePath)
+        {
+            NfsPathKind pathKind = NfsPathKind.Missing;
+            if (_PathKinds.TryGetValue(sourcePath, out NfsPathKind resolvedPathKind))
+            {
+                pathKind = resolvedPathKind;
+            }
+
+            ulong length = 0;
+            if (_FileContents.TryGetValue(sourcePath, out byte[]? fileContents))
+            {
+                length = (ulong)fileContents.LongLength;
+            }
+            else if (_SymbolicLinkTargets.TryGetValue(sourcePath, out string? symbolicLinkTarget))
+            {
+                length = (ulong)Encoding.UTF8.GetByteCount(symbolicLinkTarget);
+            }
+
+            if (pathKind == NfsPathKind.Missing)
+            {
+                return new NfsPathInfo(sourcePath, pathKind, length);
+            }
+
+            if (!_PathTimestamps.TryGetValue(sourcePath, out PathTimestamps timestamps))
+            {
+                timestamps = CreateNextTimestamps();
+                _PathTimestamps[sourcePath] = timestamps;
+            }
+
+            return new NfsPathInfo(
+                sourcePath,
+                pathKind,
+                length,
+                timestamps.AccessTimeUtc,
+                timestamps.ModificationTimeUtc,
+                timestamps.ChangeTimeUtc);
+        }
+
+        private bool HasDirectoryChildren(string sourcePath)
+        {
+            string normalizedSourcePath = NormalizePath(sourcePath);
+
+            foreach (string candidatePath in _PathKinds.Keys)
+            {
+                string? parentDirectory = Path.GetDirectoryName(candidatePath);
+                if (string.Equals(NormalizePath(parentDirectory), normalizedSourcePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void MovePathAndDescendants(string sourceSourcePath, string destinationSourcePath)
+        {
+            List<KeyValuePair<string, NfsPathKind>> pathKindsToMove = new List<KeyValuePair<string, NfsPathKind>>();
+            foreach (KeyValuePair<string, NfsPathKind> pathKind in _PathKinds)
+            {
+                if (IsSamePathOrDescendant(pathKind.Key, sourceSourcePath))
+                {
+                    pathKindsToMove.Add(pathKind);
+                }
+            }
+
+            List<KeyValuePair<string, byte[]>> fileContentsToMove = new List<KeyValuePair<string, byte[]>>();
+            foreach (KeyValuePair<string, byte[]> fileContent in _FileContents)
+            {
+                if (IsSamePathOrDescendant(fileContent.Key, sourceSourcePath))
+                {
+                    fileContentsToMove.Add(fileContent);
+                }
+            }
+
+            foreach (KeyValuePair<string, NfsPathKind> pathKind in pathKindsToMove)
+            {
+                _PathKinds.Remove(pathKind.Key);
+            }
+
+            foreach (KeyValuePair<string, byte[]> fileContent in fileContentsToMove)
+            {
+                _FileContents.Remove(fileContent.Key);
+            }
+
+            foreach (KeyValuePair<string, NfsPathKind> pathKind in pathKindsToMove)
+            {
+                _PathKinds[RewritePath(pathKind.Key, sourceSourcePath, destinationSourcePath)] = pathKind.Value;
+            }
+
+            foreach (KeyValuePair<string, byte[]> fileContent in fileContentsToMove)
+            {
+                _FileContents[RewritePath(fileContent.Key, sourceSourcePath, destinationSourcePath)] = fileContent.Value.AsSpan().ToArray();
+            }
+
+            List<KeyValuePair<string, PathTimestamps>> pathTimestampsToMove = new List<KeyValuePair<string, PathTimestamps>>();
+            foreach (KeyValuePair<string, PathTimestamps> pathTimestamp in _PathTimestamps)
+            {
+                if (IsSamePathOrDescendant(pathTimestamp.Key, sourceSourcePath))
+                {
+                    pathTimestampsToMove.Add(pathTimestamp);
+                }
+            }
+
+            foreach (KeyValuePair<string, PathTimestamps> pathTimestamp in pathTimestampsToMove)
+            {
+                _PathTimestamps.Remove(pathTimestamp.Key);
+            }
+
+            foreach (KeyValuePair<string, PathTimestamps> pathTimestamp in pathTimestampsToMove)
+            {
+                _PathTimestamps[RewritePath(pathTimestamp.Key, sourceSourcePath, destinationSourcePath)] = pathTimestamp.Value;
+            }
+
+            List<KeyValuePair<string, string>> symbolicLinkTargetsToMove = new List<KeyValuePair<string, string>>();
+            foreach (KeyValuePair<string, string> symbolicLinkTarget in _SymbolicLinkTargets)
+            {
+                if (IsSamePathOrDescendant(symbolicLinkTarget.Key, sourceSourcePath))
+                {
+                    symbolicLinkTargetsToMove.Add(symbolicLinkTarget);
+                }
+            }
+
+            foreach (KeyValuePair<string, string> symbolicLinkTarget in symbolicLinkTargetsToMove)
+            {
+                _SymbolicLinkTargets.Remove(symbolicLinkTarget.Key);
+            }
+
+            foreach (KeyValuePair<string, string> symbolicLinkTarget in symbolicLinkTargetsToMove)
+            {
+                _SymbolicLinkTargets[RewritePath(symbolicLinkTarget.Key, sourceSourcePath, destinationSourcePath)] = symbolicLinkTarget.Value;
+            }
+        }
+
+        private void RemovePathAndDescendants(string sourcePath)
+        {
+            List<string> pathKindsToRemove = new List<string>();
+            foreach (string candidatePath in _PathKinds.Keys)
+            {
+                if (IsSamePathOrDescendant(candidatePath, sourcePath))
+                {
+                    pathKindsToRemove.Add(candidatePath);
+                }
+            }
+
+            foreach (string pathKindToRemove in pathKindsToRemove)
+            {
+                _PathKinds.Remove(pathKindToRemove);
+            }
+
+            List<string> fileContentsToRemove = new List<string>();
+            foreach (string candidatePath in _FileContents.Keys)
+            {
+                if (IsSamePathOrDescendant(candidatePath, sourcePath))
+                {
+                    fileContentsToRemove.Add(candidatePath);
+                }
+            }
+
+            foreach (string fileContentToRemove in fileContentsToRemove)
+            {
+                _FileContents.Remove(fileContentToRemove);
+            }
+
+            List<string> pathTimestampsToRemove = new List<string>();
+            foreach (string candidatePath in _PathTimestamps.Keys)
+            {
+                if (IsSamePathOrDescendant(candidatePath, sourcePath))
+                {
+                    pathTimestampsToRemove.Add(candidatePath);
+                }
+            }
+
+            foreach (string pathTimestampToRemove in pathTimestampsToRemove)
+            {
+                _PathTimestamps.Remove(pathTimestampToRemove);
+            }
+
+            List<string> symbolicLinkTargetsToRemove = new List<string>();
+            foreach (string candidatePath in _SymbolicLinkTargets.Keys)
+            {
+                if (IsSamePathOrDescendant(candidatePath, sourcePath))
+                {
+                    symbolicLinkTargetsToRemove.Add(candidatePath);
+                }
+            }
+
+            foreach (string symbolicLinkTargetToRemove in symbolicLinkTargetsToRemove)
+            {
+                _SymbolicLinkTargets.Remove(symbolicLinkTargetToRemove);
+            }
+        }
+
+        private void EnsureTimestampForExistingPath(string sourcePath)
+        {
+            if (!_PathKinds.ContainsKey(sourcePath) || _PathTimestamps.ContainsKey(sourcePath))
+            {
+                return;
+            }
+
+            _PathTimestamps[sourcePath] = CreateNextTimestamps();
+        }
+
+        private void TouchPath(string sourcePath)
+        {
+            if (!_PathKinds.ContainsKey(sourcePath))
+            {
+                return;
+            }
+
+            _PathTimestamps[sourcePath] = CreateNextTimestamps();
+        }
+
+        private void TouchParentDirectory(string sourcePath)
+        {
+            string? parentDirectory = Path.GetDirectoryName(sourcePath);
+            if (string.IsNullOrWhiteSpace(parentDirectory))
+            {
+                return;
+            }
+
+            if (_PathKinds.TryGetValue(parentDirectory, out NfsPathKind parentPathKind)
+                && parentPathKind == NfsPathKind.Directory)
+            {
+                TouchPath(parentDirectory);
+            }
+        }
+
+        private PathTimestamps CreateNextTimestamps()
+        {
+            DateTimeOffset timestampUtc = new DateTimeOffset(_nextTimestampTicks, TimeSpan.Zero);
+            _nextTimestampTicks += TimeSpan.TicksPerSecond;
+            return new PathTimestamps(timestampUtc, timestampUtc, timestampUtc);
+        }
+
+        private static bool IsSamePathOrDescendant(string candidatePath, string sourcePath)
+        {
+            string normalizedCandidatePath = NormalizePath(candidatePath);
+            string normalizedSourcePath = NormalizePath(sourcePath);
+
+            if (string.Equals(normalizedCandidatePath, normalizedSourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!normalizedCandidatePath.StartsWith(normalizedSourcePath, StringComparison.OrdinalIgnoreCase)
+                || normalizedCandidatePath.Length <= normalizedSourcePath.Length)
+            {
+                return false;
+            }
+
+            char separator = normalizedCandidatePath[normalizedSourcePath.Length];
+            return separator == Path.DirectorySeparatorChar || separator == Path.AltDirectorySeparatorChar;
+        }
+
+        private static string RewritePath(string candidatePath, string sourcePath, string destinationPath)
+        {
+            if (string.Equals(NormalizePath(candidatePath), NormalizePath(sourcePath), StringComparison.OrdinalIgnoreCase))
+            {
+                return destinationPath;
+            }
+
+            return destinationPath + candidatePath.Substring(sourcePath.Length);
+        }
+
+        private static string NormalizePath(string? sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                return string.Empty;
+            }
+
+            return sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        private readonly struct PathTimestamps
+        {
+            internal PathTimestamps(DateTimeOffset accessTimeUtc, DateTimeOffset modificationTimeUtc, DateTimeOffset changeTimeUtc)
+            {
+                AccessTimeUtc = accessTimeUtc;
+                ModificationTimeUtc = modificationTimeUtc;
+                ChangeTimeUtc = changeTimeUtc;
+            }
+
+            internal DateTimeOffset AccessTimeUtc { get; }
+
+            internal DateTimeOffset ModificationTimeUtc { get; }
+
+            internal DateTimeOffset ChangeTimeUtc { get; }
+        }
+    }
+}

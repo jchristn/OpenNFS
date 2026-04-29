@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Shared Touchstone suite descriptors for OpenNFS.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Client\OpenNFS.Client.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V42\OpenNFS.Protocol.V42.csproj" />
+    <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
+    <ProjectReference Include="..\OpenNFS.Server\OpenNFS.Server.csproj" />
+    <ProjectReference Include="..\OpenNFS.XdrGen\OpenNFS.XdrGen.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Touchstone.Core" />
+  </ItemGroup>
+</Project>

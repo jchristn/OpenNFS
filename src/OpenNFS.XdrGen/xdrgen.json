@@ -1,0 +1,54 @@
+{
+  "projects": [
+    {
+      "id": "rpc",
+      "inputDirectory": "../../specs/xdr/rpc",
+      "outputProjectPath": "../OpenNFS.Rpc/OpenNFS.Rpc.csproj",
+      "outputNamespace": "OpenNFS.Rpc.Generated",
+      "entryPointFiles": [
+        "rpc_msg.x",
+        "rpcb_prot.x",
+        "pmap_prot.x"
+      ]
+    },
+    {
+      "id": "nfs3",
+      "inputDirectory": "../../specs/xdr/nfs3",
+      "outputProjectPath": "../OpenNFS.Protocol.V3/OpenNFS.Protocol.V3.csproj",
+      "outputNamespace": "OpenNFS.Protocol.V3.Generated",
+      "entryPointFiles": [
+        "nfs3.x",
+        "mount3.x",
+        "nlm4.x",
+        "nsm.x"
+      ]
+    },
+    {
+      "id": "nfs40",
+      "inputDirectory": "../../specs/xdr/nfs4",
+      "outputProjectPath": "../OpenNFS.Protocol.V40/OpenNFS.Protocol.V40.csproj",
+      "outputNamespace": "OpenNFS.Protocol.V40.Generated",
+      "entryPointFiles": [
+        "nfs4_0.x"
+      ]
+    },
+    {
+      "id": "nfs41",
+      "inputDirectory": "../../specs/xdr/nfs4",
+      "outputProjectPath": "../OpenNFS.Protocol.V41/OpenNFS.Protocol.V41.csproj",
+      "outputNamespace": "OpenNFS.Protocol.V41.Generated",
+      "entryPointFiles": [
+        "nfs4_1.x"
+      ]
+    },
+    {
+      "id": "nfs42",
+      "inputDirectory": "../../specs/xdr/nfs4",
+      "outputProjectPath": "../OpenNFS.Protocol.V42/OpenNFS.Protocol.V42.csproj",
+      "outputNamespace": "OpenNFS.Protocol.V42.Generated",
+      "entryPointFiles": [
+        "nfs4_2.x"
+      ]
+    }
+  ]
+}
