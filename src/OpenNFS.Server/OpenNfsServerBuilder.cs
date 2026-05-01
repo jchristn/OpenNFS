@@ -4,6 +4,7 @@ namespace OpenNFS.Server
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
+    using OpenNFS.Rpc.Security.RpcSecGss;
     using OpenNFS.Server.Abstractions;
     using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.FileHandles;
@@ -28,6 +29,7 @@ namespace OpenNFS.Server
         private INfsIdMapper? _IdMapper;
         private INfsLocking? _Locking;
         private INfsSparse? _Sparse;
+        private IRpcSecGssMechanism? _RpcSecGssMechanism;
         private bool _EnableUdpForNfsV3;
         private string _ListenerAddress = "0.0.0.0";
         private int _ListenerPort = 2049;
@@ -254,6 +256,22 @@ namespace OpenNFS.Server
         }
 
         /// <summary>
+        /// Registers an RPCSEC_GSS mechanism with the server. When set, inbound calls that arrive
+        /// with <c>auth_flavor.RPCSEC_GSS</c> credentials are routed through this mechanism for
+        /// context establishment, MIC verification, and (for the privacy service) Wrap / Unwrap.
+        /// </summary>
+        /// <param name="mechanism">The mechanism to register. Typically an
+        /// <c>OpenNfsKerberosMechanism</c> backed by a configured Kerberos KDC.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="mechanism"/> is null.</exception>
+        public OpenNfsServerBuilder UseRpcSecGssMechanism(IRpcSecGssMechanism mechanism)
+        {
+            ArgumentNullException.ThrowIfNull(mechanism);
+            _RpcSecGssMechanism = mechanism;
+            return this;
+        }
+
+        /// <summary>
         /// Adds a static export definition to the configured server surface.
         /// </summary>
         /// <param name="exportDefinition">Export definition to add.</param>
@@ -336,7 +354,8 @@ namespace OpenNFS.Server
                 delegations: ResolveDelegations(),
                 copyClone: ResolveCopyClone(),
                 sparse: ResolveSparse(),
-                idMapper: ResolveIdMapper());
+                idMapper: ResolveIdMapper(),
+                rpcSecGssMechanism: _RpcSecGssMechanism);
         }
 
         /// <summary>

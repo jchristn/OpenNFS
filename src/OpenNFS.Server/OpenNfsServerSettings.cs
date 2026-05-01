@@ -1,6 +1,7 @@
 namespace OpenNFS.Server
 {
     using System;
+    using OpenNFS.Rpc.Security.RpcSecGss;
     using OpenNFS.Server.Abstractions;
     using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.Internal;
@@ -56,6 +57,11 @@ namespace OpenNFS.Server
         /// <param name="copyClone">Optional copy and clone capability contract.</param>
         /// <param name="sparse">Optional sparse-file capability contract.</param>
         /// <param name="idMapper">Optional identity-mapping capability contract.</param>
+        /// <param name="rpcSecGssMechanism">Optional RPCSEC_GSS mechanism. When set, inbound calls
+        /// arriving with <c>auth_flavor.RPCSEC_GSS</c> credentials are routed through this mechanism
+        /// for context establishment, MIC verification, and (for the privacy service) Wrap / Unwrap.
+        /// When null, the server still accepts <c>AUTH_NONE</c> and <c>AUTH_SYS</c> traffic but
+        /// rejects RPCSEC_GSS calls with <c>AUTH_TOOWEAK</c>.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="fileSystem"/> or <paramref name="fileHandleProvider"/> is null.</exception>
         /// <exception cref="ArgumentException">Thrown when a text input is empty or whitespace.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when a numeric value is outside the supported range.</exception>
@@ -74,7 +80,8 @@ namespace OpenNFS.Server
             INfsDelegations? delegations = null,
             INfsCopyClone? copyClone = null,
             INfsSparse? sparse = null,
-            INfsIdMapper? idMapper = null)
+            INfsIdMapper? idMapper = null,
+            IRpcSecGssMechanism? rpcSecGssMechanism = null)
         {
             ArgumentNullException.ThrowIfNull(fileSystem);
 
@@ -114,6 +121,10 @@ namespace OpenNFS.Server
                 copyClone: copyClone,
                 sparse: sparse,
                 idMapper: idMapper);
+            RpcSecGssMechanism = rpcSecGssMechanism;
+            RpcSecGssAuthenticator = new RpcSecGssAuthenticator(
+                contextStore: new RpcSecGssInMemoryContextStore(),
+                isMechanismRegistered: rpcSecGssMechanism is not null);
         }
 
         /// <summary>
@@ -165,5 +176,19 @@ namespace OpenNFS.Server
         /// Gets the optional capability catalog associated with the settings.
         /// </summary>
         public NfsServerCapabilities Capabilities { get; }
+
+        /// <summary>
+        /// Gets the optional RPCSEC_GSS mechanism. When non-null, inbound calls arriving with
+        /// <c>auth_flavor.RPCSEC_GSS</c> credentials are routed through this mechanism for context
+        /// establishment, MIC verification, and (for the privacy service) Wrap / Unwrap.
+        /// </summary>
+        public IRpcSecGssMechanism? RpcSecGssMechanism { get; }
+
+        /// <summary>
+        /// Gets the RPCSEC_GSS authenticator. Always non-null. When no mechanism is registered, the
+        /// authenticator surfaces <see cref="OpenNFS.Rpc.Generated.auth_stat.AUTH_TOOWEAK"/> for any
+        /// inbound RPCSEC_GSS credential.
+        /// </summary>
+        public RpcSecGssAuthenticator RpcSecGssAuthenticator { get; }
     }
 }

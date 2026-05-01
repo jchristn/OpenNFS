@@ -18,6 +18,11 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
   </ItemGroup>
   <ItemGroup>
+    <!-- OpenNFS.Server publicly exposes a registration point for IRpcSecGssMechanism so
+         consumers can opt their host into RPCSEC_GSS. The project reference gives the
+         server source access to the abstraction at compile time; SuppressDependenciesWhenPacking
+         keeps OpenNFS.Rpc out of the public package's transitive NuGet dependencies. -->
+    <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />

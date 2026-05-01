@@ -521,6 +521,67 @@ namespace Test.Shared
                         skip: !KerberosProbeEnvironment.Current.IsAvailable,
                         skipReason: KerberosProbeEnvironment.Current.SkipReason,
                         executeAsync: ExecuteRpcSecGssIntegrityFailureRejectedAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "SecuritySuites",
+                        caseId: "ServerBuilderRegistersRpcSecGssMechanism",
+                        displayName: "OpenNfsServerBuilder.UseRpcSecGssMechanism wires the mechanism into the server settings and authenticator",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: _ =>
+                        {
+                            OpenNFS.Server.OpenNfsServerBuilder builder = new OpenNFS.Server.OpenNfsServerBuilder()
+                                .UseFileSystem(new OpenNFS.Server.FileSystems.LocalNfsFileSystem())
+                                .UseRpcSecGssMechanism(new OpenNfsKerberosMechanism(
+                                    new OpenNfsKerberosMechanismOptions("nfs/sample.example.test@EXAMPLE.TEST")));
+
+                            OpenNFS.Server.OpenNfsServerSettings settings = builder.BuildSettings();
+
+                            if (settings.RpcSecGssMechanism is null)
+                            {
+                                throw new InvalidOperationException(
+                                    "OpenNfsServerBuilder.UseRpcSecGssMechanism must propagate the mechanism into the resulting OpenNfsServerSettings.");
+                            }
+
+                            if (settings.RpcSecGssMechanism.MechanismName != RpcSecGssMechanismName.KerberosV5)
+                            {
+                                throw new InvalidOperationException(
+                                    "Configured server settings must surface the registered Kerberos mechanism by name.");
+                            }
+
+                            OpenNFS.Server.OpenNfsServerSettings unconfigured = new OpenNFS.Server.OpenNfsServerBuilder()
+                                .UseFileSystem(new OpenNFS.Server.FileSystems.LocalNfsFileSystem())
+                                .BuildSettings();
+
+                            if (unconfigured.RpcSecGssAuthenticator is null)
+                            {
+                                throw new InvalidOperationException(
+                                    "Server settings must always expose a non-null RpcSecGssAuthenticator.");
+                            }
+
+                            opaque_auth credential = RpcSecGssCredentialCodec.Write(new RpcSecGssCredentialBody(
+                                version: RpcSecGssProtocolConstants.Version,
+                                procedure: RpcSecGssProcedure.Init,
+                                sequenceNumber: 0,
+                                service: RpcSecGssService.None,
+                                contextHandle: ReadOnlyMemory<byte>.Empty));
+
+                            RpcSecGssAuthenticationResult tooWeakResult = unconfigured.RpcSecGssAuthenticator.Evaluate(credential);
+                            if (tooWeakResult.Outcome != RpcSecGssAuthenticationOutcome.MechanismUnavailable
+                                || tooWeakResult.RejectionStatus != auth_stat.AUTH_TOOWEAK)
+                            {
+                                throw new InvalidOperationException(
+                                    "Without a registered mechanism, the authenticator must surface AUTH_TOOWEAK for inbound RPCSEC_GSS credentials.");
+                            }
+
+                            RpcSecGssAuthenticationResult acceptedResult = settings.RpcSecGssAuthenticator.Evaluate(credential);
+                            if (acceptedResult.Outcome != RpcSecGssAuthenticationOutcome.Accepted)
+                            {
+                                throw new InvalidOperationException(
+                                    "With a registered mechanism, the authenticator must accept an INIT credential for downstream context establishment.");
+                            }
+
+                            return Task.CompletedTask;
+                        }),
                 });
         }
 
