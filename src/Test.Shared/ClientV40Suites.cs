@@ -143,6 +143,208 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ClientV40Suites",
+                        caseId: "RawCompoundAdvancedOpsPositive",
+                        displayName: "Raw NFSv4.0 COMPOUND execution preserves explicit public-root and verify operation fidelity",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            OpenNfsServer server = CreateServer();
+                            NfsFileHandle rootHandle = await server.CreateFileHandleAsync(
+                                new NfsFileHandleTarget("/", @"C:\exports"),
+                                cancellationToken).ConfigureAwait(false);
+
+                            await RunAgainstLoopbackServiceAsync(
+                                server,
+                                expectedCallCount: 2,
+                                async client =>
+                                {
+                                    OpenNfsCompoundReply verifyReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-positive-verify",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreatePutPublicFileHandleOperation(),
+                                                CreateVerifyOperation(nfs_ftype4.NF4DIR),
+                                                new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_GETFH, Array.Empty<byte>()),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedVerifyReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        verifyReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    byte[]? publicHandleBytes = decodedVerifyReply.resarray?[2].opgetfh?.resok4?.@object?.Value;
+                                    if (decodedVerifyReply.status != nfsstat4.NFS4_OK
+                                        || decodedVerifyReply.resarray is null
+                                        || decodedVerifyReply.resarray.Length != 3
+                                        || decodedVerifyReply.resarray[0].opputpubfh?.status != nfsstat4.NFS4_OK
+                                        || decodedVerifyReply.resarray[1].opverify?.status != nfsstat4.NFS4_OK
+                                        || decodedVerifyReply.resarray[2].opgetfh?.status != nfsstat4.NFS4_OK
+                                        || publicHandleBytes is null
+                                        || !publicHandleBytes.AsSpan().SequenceEqual(rootHandle.ToArray()))
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve PUTPUBFH, VERIFY, and GETFH fidelity over the public transport path.");
+                                    }
+
+                                    OpenNfsCompoundReply nverifyReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-positive-nverify",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreatePutPublicFileHandleOperation(),
+                                                CreateNotVerifyOperation(nfs_ftype4.NF4REG),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedNverifyReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        nverifyReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedNverifyReply.status != nfsstat4.NFS4_OK
+                                        || decodedNverifyReply.resarray is null
+                                        || decodedNverifyReply.resarray.Length != 2
+                                        || decodedNverifyReply.resarray[1].opnverify?.status != nfsstat4.NFS4_OK)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve successful NVERIFY execution over the public transport path.");
+                                    }
+                                },
+                                cancellationToken).ConfigureAwait(false);
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientV40Suites",
+                        caseId: "RawCompoundAdvancedOpsNegative",
+                        displayName: "Raw NFSv4.0 COMPOUND execution preserves negative verify and capability-gated operation results",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            OpenNfsServer server = CreateServer();
+
+                            await RunAgainstLoopbackServiceAsync(
+                                server,
+                                expectedCallCount: 5,
+                                async client =>
+                                {
+                                    OpenNfsCompoundReply verifyReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-negative-verify",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreatePutPublicFileHandleOperation(),
+                                                CreateVerifyOperation(nfs_ftype4.NF4REG),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedVerifyReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        verifyReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedVerifyReply.status != nfsstat4.NFS4ERR_NOT_SAME
+                                        || decodedVerifyReply.resarray is null
+                                        || decodedVerifyReply.resarray.Length != 2
+                                        || decodedVerifyReply.resarray[1].opverify?.status != nfsstat4.NFS4ERR_NOT_SAME)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve VERIFY mismatch results.");
+                                    }
+
+                                    OpenNfsCompoundReply nverifyReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-negative-nverify",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreatePutPublicFileHandleOperation(),
+                                                CreateNotVerifyOperation(nfs_ftype4.NF4DIR),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedNverifyReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        nverifyReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedNverifyReply.status != nfsstat4.NFS4ERR_SAME
+                                        || decodedNverifyReply.resarray is null
+                                        || decodedNverifyReply.resarray.Length != 2
+                                        || decodedNverifyReply.resarray[1].opnverify?.status != nfsstat4.NFS4ERR_SAME)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve NVERIFY same-attribute results.");
+                                    }
+
+                                    OpenNfsCompoundReply openAttributeReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-negative-openattr",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreatePutPublicFileHandleOperation(),
+                                                CreateOpenAttributeOperation(createdir: false),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedOpenAttributeReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        openAttributeReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedOpenAttributeReply.status != nfsstat4.NFS4ERR_NOTSUPP
+                                        || decodedOpenAttributeReply.resarray is null
+                                        || decodedOpenAttributeReply.resarray.Length != 2
+                                        || decodedOpenAttributeReply.resarray[1].opopenattr?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve OPENATTR capability-gated NOTSUPP results.");
+                                    }
+
+                                    OpenNfsCompoundReply delegationPurgeReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-negative-delegpurge",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreateDelegationPurgeOperation(0UL),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedDelegationPurgeReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        delegationPurgeReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedDelegationPurgeReply.status != nfsstat4.NFS4ERR_NOTSUPP
+                                        || decodedDelegationPurgeReply.resarray is null
+                                        || decodedDelegationPurgeReply.resarray.Length != 1
+                                        || decodedDelegationPurgeReply.resarray[0].opdelegpurge?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve DELEGPURGE capability-gated NOTSUPP results.");
+                                    }
+
+                                    OpenNfsCompoundReply releaseLockOwnerReply = await client.ExecuteCompoundAsync(
+                                        new OpenNfsCompoundRequest(
+                                            OpenNfsProtocolVersion.Nfs40,
+                                            "raw-advanced-negative-release-lockowner",
+                                            new OpenNfsCompoundOperation[]
+                                            {
+                                                CreateReleaseLockOwnerOperation(0UL, new byte[] { 0x01 }),
+                                            }),
+                                        OpenNfsOperationIdempotency.Idempotent,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    COMPOUND4res decodedReleaseLockOwnerReply = OpenNfsV40ReplyDecoder.ReadCompoundResult(
+                                        releaseLockOwnerReply.EncodedReply,
+                                        "Raw NFSv4.0 COMPOUND");
+                                    if (decodedReleaseLockOwnerReply.status != nfsstat4.NFS4ERR_NOTSUPP
+                                        || decodedReleaseLockOwnerReply.resarray is null
+                                        || decodedReleaseLockOwnerReply.resarray.Length != 1
+                                        || decodedReleaseLockOwnerReply.resarray[0].oprelease_lockowner?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                                    {
+                                        throw new InvalidOperationException("Expected the raw NFSv4.0 client surface to preserve RELEASE_LOCKOWNER capability-gated NOTSUPP results.");
+                                    }
+                                },
+                                cancellationToken).ConfigureAwait(false);
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientV40Suites",
                         caseId: "GroupedApisPositive",
                         displayName: "Grouped NFSv4.0 file and directory APIs prepare, execute, and decode successful read-only flows",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -1539,6 +1741,239 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ClientV40Suites",
+                        caseId: "GroupedLeaseExpiryRecoveryPositive",
+                        displayName: "Grouped NFSv4.0 APIs recover from lease expiry by re-registering and reopening fresh state",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            MutableClock clock = new MutableClock(new DateTimeOffset(2026, 4, 30, 12, 0, 0, TimeSpan.Zero));
+                            (OpenNfsServer server, NfsFileHandle docsHandle, NfsFileHandle noteHandle) =
+                                await CreateLockingServerAsync(cancellationToken).ConfigureAwait(false);
+                            Nfs40CompoundService service = new Nfs40CompoundService(
+                                server,
+                                leaseWindow: TimeSpan.FromMinutes(5),
+                                gracePeriodDuration: TimeSpan.FromMinutes(5),
+                                utcNow: clock.UtcNow);
+
+                            await RunAgainstLoopbackServiceAsync(
+                                service,
+                                expectedCallCount: 13,
+                                async client =>
+                                {
+                                    byte[] verifier = new byte[] { 81, 82, 83, 84, 85, 86, 87, 88 };
+                                    OpenNfsV40SetClientIdResult initialSetClientId = await client.Sessions.SetClientIdV40Async(
+                                        "client-lease-recovery",
+                                        verifier,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult initialConfirm = await client.Sessions.ConfirmClientIdV40Async(
+                                        initialSetClientId.ClientId,
+                                        initialSetClientId.ConfirmationVerifier.ToArray(),
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40OpenResult initialOpen = await client.Files.OpenExistingV40Async(
+                                        docsHandle.ToArray(),
+                                        initialSetClientId.ClientId,
+                                        "owner-lease-recovery",
+                                        "notes.txt",
+                                        OpenNfsV40ShareAccess.Both,
+                                        OpenNfsV40ShareDeny.None,
+                                        1U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40StateIdResult initialConfirmOpen = await client.Files.ConfirmOpenV40Async(
+                                        initialOpen.StateId!,
+                                        2U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40LockResult initialLock = await client.Locks.LockFromOpenV40Async(
+                                        noteHandle.ToArray(),
+                                        initialConfirmOpen.StateId!,
+                                        3U,
+                                        initialSetClientId.ClientId,
+                                        "lock-owner-lease-recovery",
+                                        1U,
+                                        OpenNfsV40LockType.Write,
+                                        0UL,
+                                        5UL,
+                                        reclaim: false,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    clock.Advance(TimeSpan.FromMinutes(6));
+
+                                    OpenNfsV40SetClientIdResult recoveredSetClientId = await client.Sessions.SetClientIdV40Async(
+                                        "client-lease-recovery",
+                                        verifier,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult recoveredConfirm = await client.Sessions.ConfirmClientIdV40Async(
+                                        recoveredSetClientId.ClientId,
+                                        recoveredSetClientId.ConfirmationVerifier.ToArray(),
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40OpenResult recoveredOpen = await client.Files.OpenExistingV40Async(
+                                        docsHandle.ToArray(),
+                                        recoveredSetClientId.ClientId,
+                                        "owner-lease-recovery",
+                                        "notes.txt",
+                                        OpenNfsV40ShareAccess.Both,
+                                        OpenNfsV40ShareDeny.None,
+                                        1U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40StateIdResult recoveredConfirmOpen = await client.Files.ConfirmOpenV40Async(
+                                        recoveredOpen.StateId!,
+                                        2U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult recoveredRenew = await client.Sessions.RenewV40Async(
+                                        recoveredSetClientId.ClientId,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40LockResult recoveredLock = await client.Locks.LockFromOpenV40Async(
+                                        noteHandle.ToArray(),
+                                        recoveredConfirmOpen.StateId!,
+                                        3U,
+                                        recoveredSetClientId.ClientId,
+                                        "lock-owner-lease-recovery",
+                                        1U,
+                                        OpenNfsV40LockType.Write,
+                                        0UL,
+                                        5UL,
+                                        reclaim: false,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40LockResult recoveredUnlock = await client.Locks.UnlockV40Async(
+                                        noteHandle.ToArray(),
+                                        recoveredLock.StateId!,
+                                        2U,
+                                        OpenNfsV40LockType.Write,
+                                        0UL,
+                                        5UL,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40StateIdResult recoveredClose = await client.Files.CloseV40Async(
+                                        recoveredConfirmOpen.StateId!,
+                                        4U,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    if (!initialSetClientId.IsSuccess
+                                        || !initialConfirm.IsSuccess
+                                        || !initialOpen.IsSuccess
+                                        || !initialConfirmOpen.IsSuccess
+                                        || !initialLock.IsSuccess
+                                        || !recoveredSetClientId.IsSuccess
+                                        || recoveredSetClientId.ClientId == initialSetClientId.ClientId
+                                        || !recoveredConfirm.IsSuccess
+                                        || !recoveredOpen.IsSuccess
+                                        || !recoveredConfirmOpen.IsSuccess
+                                        || !recoveredRenew.IsSuccess
+                                        || !recoveredLock.IsSuccess
+                                        || !recoveredUnlock.IsSuccess
+                                        || !recoveredClose.IsSuccess
+                                        || recoveredClose.StateId?.SequenceId != 3U)
+                                    {
+                                        throw new InvalidOperationException("Expected grouped NFSv4.0 clients to recover from lease expiry by re-registering and driving a fresh open, renew, lock, unlock, and close flow.");
+                                    }
+                                },
+                                cancellationToken).ConfigureAwait(false);
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientV40Suites",
+                        caseId: "GroupedLeaseExpiryRecoveryNegative",
+                        displayName: "Grouped NFSv4.0 APIs surface BAD_STATEID and STALE_CLIENTID results before lease-expiry recovery",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            MutableClock clock = new MutableClock(new DateTimeOffset(2026, 4, 30, 13, 0, 0, TimeSpan.Zero));
+                            (OpenNfsServer server, NfsFileHandle docsHandle, NfsFileHandle noteHandle) =
+                                await CreateLockingServerAsync(cancellationToken).ConfigureAwait(false);
+                            Nfs40CompoundService service = new Nfs40CompoundService(
+                                server,
+                                leaseWindow: TimeSpan.FromMinutes(5),
+                                gracePeriodDuration: TimeSpan.FromMinutes(5),
+                                utcNow: clock.UtcNow);
+
+                            await RunAgainstLoopbackServiceAsync(
+                                service,
+                                expectedCallCount: 10,
+                                async client =>
+                                {
+                                    OpenNfsV40SetClientIdResult stateClientSet = await client.Sessions.SetClientIdV40Async(
+                                        "client-lease-negative-state",
+                                        new byte[] { 91, 92, 93, 94, 95, 96, 97, 98 },
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult stateClientConfirm = await client.Sessions.ConfirmClientIdV40Async(
+                                        stateClientSet.ClientId,
+                                        stateClientSet.ConfirmationVerifier.ToArray(),
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40OpenResult stateClientOpen = await client.Files.OpenExistingV40Async(
+                                        docsHandle.ToArray(),
+                                        stateClientSet.ClientId,
+                                        "owner-lease-negative-state",
+                                        "notes.txt",
+                                        OpenNfsV40ShareAccess.Both,
+                                        OpenNfsV40ShareDeny.None,
+                                        1U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40StateIdResult stateClientConfirmOpen = await client.Files.ConfirmOpenV40Async(
+                                        stateClientOpen.StateId!,
+                                        2U,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40LockResult stateClientLock = await client.Locks.LockFromOpenV40Async(
+                                        noteHandle.ToArray(),
+                                        stateClientConfirmOpen.StateId!,
+                                        3U,
+                                        stateClientSet.ClientId,
+                                        "lock-owner-lease-negative-state",
+                                        1U,
+                                        OpenNfsV40LockType.Write,
+                                        0UL,
+                                        5UL,
+                                        reclaim: false,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    OpenNfsV40SetClientIdResult renewClientSet = await client.Sessions.SetClientIdV40Async(
+                                        "client-lease-negative-renew",
+                                        new byte[] { 101, 102, 103, 104, 105, 106, 107, 108 },
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult renewClientConfirm = await client.Sessions.ConfirmClientIdV40Async(
+                                        renewClientSet.ClientId,
+                                        renewClientSet.ConfirmationVerifier.ToArray(),
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    clock.Advance(TimeSpan.FromMinutes(6));
+
+                                    OpenNfsV40LockResult expiredUnlock = await client.Locks.UnlockV40Async(
+                                        noteHandle.ToArray(),
+                                        stateClientLock.StateId!,
+                                        2U,
+                                        OpenNfsV40LockType.Write,
+                                        0UL,
+                                        5UL,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40SessionResult expiredRenew = await client.Sessions.RenewV40Async(
+                                        renewClientSet.ClientId,
+                                        cancellationToken).ConfigureAwait(false);
+                                    OpenNfsV40OpenResult staleOpen = await client.Files.OpenExistingV40Async(
+                                        docsHandle.ToArray(),
+                                        stateClientSet.ClientId,
+                                        "owner-lease-negative-state",
+                                        "notes.txt",
+                                        OpenNfsV40ShareAccess.Both,
+                                        OpenNfsV40ShareDeny.None,
+                                        4U,
+                                        cancellationToken).ConfigureAwait(false);
+
+                                    if (!stateClientSet.IsSuccess
+                                        || !stateClientConfirm.IsSuccess
+                                        || !stateClientOpen.IsSuccess
+                                        || !stateClientConfirmOpen.IsSuccess
+                                        || !stateClientLock.IsSuccess
+                                        || !renewClientSet.IsSuccess
+                                        || !renewClientConfirm.IsSuccess
+                                        || expiredUnlock.Status != OpenNfsV40Status.BadStateId
+                                        || expiredRenew.Status != OpenNfsV40Status.StaleClientId
+                                        || staleOpen.Status != OpenNfsV40Status.StaleClientId)
+                                    {
+                                        throw new InvalidOperationException("Expected grouped NFSv4.0 clients to surface BAD_STATEID and STALE_CLIENTID after lease-expired state has been purged.");
+                                    }
+                                },
+                                cancellationToken).ConfigureAwait(false);
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientV40Suites",
                         caseId: "GroupedDelegationApisPositive",
                         displayName: "Grouped NFSv4.0 delegation APIs grant, recall, and return read delegations",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -1751,6 +2186,76 @@ namespace Test.Shared
             return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_PUTFH, writer.ToArray());
         }
 
+        private static OpenNfsCompoundOperation CreatePutPublicFileHandleOperation()
+        {
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_PUTPUBFH, Array.Empty<byte>());
+        }
+
+        private static OpenNfsCompoundOperation CreateVerifyOperation(nfs_ftype4 fileType)
+        {
+            XdrWriter writer = new XdrWriter();
+            new VERIFY4args
+            {
+                obj_attributes = CreateTypeAttributes(fileType),
+            }.WriteTo(writer);
+
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_VERIFY, writer.ToArray());
+        }
+
+        private static OpenNfsCompoundOperation CreateNotVerifyOperation(nfs_ftype4 fileType)
+        {
+            XdrWriter writer = new XdrWriter();
+            new NVERIFY4args
+            {
+                obj_attributes = CreateTypeAttributes(fileType),
+            }.WriteTo(writer);
+
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_NVERIFY, writer.ToArray());
+        }
+
+        private static OpenNfsCompoundOperation CreateOpenAttributeOperation(bool createdir)
+        {
+            XdrWriter writer = new XdrWriter();
+            new OPENATTR4args
+            {
+                createdir = createdir,
+            }.WriteTo(writer);
+
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_OPENATTR, writer.ToArray());
+        }
+
+        private static OpenNfsCompoundOperation CreateDelegationPurgeOperation(ulong clientId)
+        {
+            XdrWriter writer = new XdrWriter();
+            new DELEGPURGE4args
+            {
+                clientid = new clientid4
+                {
+                    Value = clientId,
+                },
+            }.WriteTo(writer);
+
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_DELEGPURGE, writer.ToArray());
+        }
+
+        private static OpenNfsCompoundOperation CreateReleaseLockOwnerOperation(ulong clientId, byte[] ownerBytes)
+        {
+            XdrWriter writer = new XdrWriter();
+            new RELEASE_LOCKOWNER4args
+            {
+                lock_owner = new lock_owner4
+                {
+                    clientid = new clientid4
+                    {
+                        Value = clientId,
+                    },
+                    owner = ownerBytes,
+                },
+            }.WriteTo(writer);
+
+            return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_RELEASE_LOCKOWNER, writer.ToArray());
+        }
+
         private static OpenNfsCompoundOperation CreateReadDirectoryOperation(ulong cookie, byte[] cookieVerifier, uint maxCount)
         {
             XdrWriter writer = new XdrWriter();
@@ -1785,6 +2290,24 @@ namespace Test.Shared
             }.WriteTo(writer);
 
             return new OpenNfsCompoundOperation((uint)nfs_opnum4.OP_READDIR, writer.ToArray());
+        }
+
+        private static fattr4 CreateTypeAttributes(nfs_ftype4 fileType)
+        {
+            XdrWriter writer = new XdrWriter();
+            new fattr4_type
+            {
+                Value = fileType,
+            }.WriteTo(writer);
+
+            return new fattr4
+            {
+                attrmask = Nfs40AttributeEncoder.CreateBitmap((int)Nfs40Constants.FATTR4_TYPE),
+                attr_vals = new attrlist4
+                {
+                    Value = writer.ToArray(),
+                },
+            };
         }
 
         private static OpenNfsServer CreateServer(

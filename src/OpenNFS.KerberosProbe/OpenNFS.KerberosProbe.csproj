@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>Standalone Kerberos probe app that authenticates against the OpenNFS test KDC and exercises the OpenNfsKerberosMechanism end-to-end.</Description>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <RootNamespace>OpenNFS.KerberosProbe</RootNamespace>
+    <AssemblyName>OpenNFS.KerberosProbe</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
+  </ItemGroup>
+</Project>

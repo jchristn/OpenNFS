@@ -2,12 +2,17 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
+    using System.ComponentModel;
     using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Client;
+    using OpenNFS.Client.Apis;
+    using OpenNFS.Client.Compound;
+    using OpenNFS.Client.Raw;
     using OpenNFS.Server;
     using OpenNFS.Server.FileHandles;
     using Test.Shared.Infrastructure;
@@ -92,6 +97,76 @@ namespace Test.Shared
 
                             return Task.CompletedTask;
                         }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "CompatibilityPrimarySurfaceShapeIsPresent",
+                        displayName: "Client compatibility primary surface is present and advanced members are marked secondary",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: _ =>
+                        {
+                            MethodInfo? connectAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.ConnectAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? tryConnectAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.TryConnectAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? disconnectAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.DisconnectAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? tryDisconnectAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.TryDisconnectAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? openAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.OpenAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? closeAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.CloseAsync), new[] { typeof(CancellationToken) });
+                            MethodInfo? mountAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.MountAsync), new[] { typeof(string), typeof(CancellationToken) });
+                            MethodInfo? tryMountAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.TryMountAsync), new[] { typeof(string), typeof(CancellationToken) });
+                            MethodInfo? createMountSessionFromHandle = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.CreateMountSession), new[] { typeof(string), typeof(byte[]) });
+                            MethodInfo? createMountSessionFromResult = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.CreateMountSession), new[] { typeof(string), typeof(OpenNfsMountV3Result) });
+                            MethodInfo? prepareV3ProcedureAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.PrepareV3ProcedureAsync), new[] { typeof(OpenNfsV3ProcedureRequest), typeof(CancellationToken) });
+                            MethodInfo? executeV3ProcedureAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.ExecuteV3ProcedureAsync), new[] { typeof(OpenNfsV3ProcedureRequest), typeof(OpenNfsOperationIdempotency), typeof(CancellationToken) });
+                            MethodInfo? prepareCompoundAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.PrepareCompoundAsync), new[] { typeof(OpenNfsCompoundRequest), typeof(CancellationToken) });
+                            MethodInfo? executeCompoundAsync = typeof(OpenNfsClient).GetMethod(nameof(OpenNfsClient.ExecuteCompoundAsync), new[] { typeof(OpenNfsCompoundRequest), typeof(OpenNfsOperationIdempotency), typeof(CancellationToken) });
+                            MethodInfo? tryListExportsV3Async = typeof(ExportApis).GetMethod(nameof(ExportApis.TryListExportsV3Async), new[] { typeof(CancellationToken) });
+
+                            if (connectAsync is null
+                                || tryConnectAsync is null
+                                || disconnectAsync is null
+                                || tryDisconnectAsync is null
+                                || mountAsync is null
+                                || tryMountAsync is null
+                                || createMountSessionFromHandle is null
+                                || createMountSessionFromResult is null
+                                || prepareV3ProcedureAsync is null
+                                || executeV3ProcedureAsync is null
+                                || prepareCompoundAsync is null
+                                || executeCompoundAsync is null
+                                || tryListExportsV3Async is null
+                                || typeof(OpenNfsMountSession).GetProperty(nameof(OpenNfsMountSession.Files)) is null
+                                || typeof(OpenNfsMountSession).GetProperty(nameof(OpenNfsMountSession.Directories)) is null
+                                || typeof(OpenNfsMountSession).GetProperty(nameof(OpenNfsMountSession.Metadata)) is null
+                                || typeof(OpenNfsMountSession).GetProperty(nameof(OpenNfsMountSession.Locks)) is null)
+                            {
+                                throw new InvalidOperationException("Expected the aligned compatibility primary surface to expose ConnectAsync, DisconnectAsync, TryConnectAsync, TryDisconnectAsync, MountAsync, TryMountAsync, export bootstrap Try APIs, OpenNfsMountSession, and its grouped members.");
+                            }
+
+                            AssertEditorBrowsableState(openAsync, EditorBrowsableState.Never, nameof(OpenNfsClient.OpenAsync));
+                            AssertEditorBrowsableState(closeAsync, EditorBrowsableState.Never, nameof(OpenNfsClient.CloseAsync));
+                            AssertEditorBrowsableState(createMountSessionFromHandle, EditorBrowsableState.Advanced, "CreateMountSession(string, byte[])");
+                            AssertEditorBrowsableState(createMountSessionFromResult, EditorBrowsableState.Advanced, "CreateMountSession(string, OpenNfsMountV3Result)");
+                            AssertEditorBrowsableState(prepareV3ProcedureAsync, EditorBrowsableState.Advanced, nameof(OpenNfsClient.PrepareV3ProcedureAsync));
+                            AssertEditorBrowsableState(executeV3ProcedureAsync, EditorBrowsableState.Advanced, nameof(OpenNfsClient.ExecuteV3ProcedureAsync));
+                            AssertEditorBrowsableState(prepareCompoundAsync, EditorBrowsableState.Advanced, nameof(OpenNfsClient.PrepareCompoundAsync));
+                            AssertEditorBrowsableState(executeCompoundAsync, EditorBrowsableState.Advanced, nameof(OpenNfsClient.ExecuteCompoundAsync));
+
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "BuilderCapturesAuthSysCredentialsAndMountTrafficUsesThem",
+                        displayName: "Client builder captures AUTH_SYS credentials and mount traffic uses the configured machine name",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteBuilderCapturesAuthSysCredentialsAndMountTrafficUsesThemAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "ReadmeClientSnippetCompilesFromCleanConsumerApp",
+                        displayName: "The canonical README client snippet compiles from a clean packaged consumer app",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteReadmeClientSnippetCompilesFromCleanConsumerAppAsync),
 
                     new TestCaseDescriptor(
                         suiteId: "ClientSurfaceSuites",
@@ -198,6 +273,20 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ClientSurfaceSuites",
+                        caseId: "MountSessionMaintainsSameSessionMutationConsistency",
+                        displayName: "Mount sessions keep same-session mutation paths consistent",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteMountSessionMaintainsSameSessionMutationConsistencyAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "MountSessionSupportsConcurrentPathOperationsAndRejectsRelativeNavigation",
+                        displayName: "Mount sessions support concurrent path operations and reject relative navigation segments",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteMountSessionSupportsConcurrentPathOperationsAndRejectsRelativeNavigationAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
                         caseId: "MountAsyncUsesDedicatedMountEndpoint",
                         displayName: "Client MountAsync uses a dedicated mount endpoint and returns a disposable mounted session",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
@@ -209,6 +298,13 @@ namespace Test.Shared
                         displayName: "Client MountAsync throws a clear failure for denied mounts",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
                         executeAsync: ExecuteMountAsyncThrowsForDeniedMountAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "TryLifecycleAndMountSurfacesTypedResults",
+                        displayName: "Client Try lifecycle and mount surfaces return typed result envelopes",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteTryLifecycleAndMountSurfacesTypedResultsAsync),
 
                     new TestCaseDescriptor(
                         suiteId: "ClientSurfaceSuites",
@@ -224,6 +320,86 @@ namespace Test.Shared
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
                         executeAsync: ExecutePackedClientPackagePreservesNegativeLifetimeFailuresAsync),
                 });
+        }
+
+        private static async Task ExecuteBuilderCapturesAuthSysCredentialsAndMountTrafficUsesThemAsync(CancellationToken cancellationToken)
+        {
+            const string expectedMachineName = "opennfs-test-client";
+            OpenNfsClientSettings settings = new OpenNfsClientBuilder()
+                .WithServer("127.0.0.1", 20048)
+                .WithAuthSysCredentials(expectedMachineName, 1001, 1002, new uint[] { 1003, 1004 })
+                .BuildSettings();
+
+            if (settings.AuthenticationFlavor != OpenNfsAuthenticationFlavor.AuthSys
+                || !string.Equals(settings.AuthSysCredentials.MachineName, expectedMachineName, StringComparison.Ordinal)
+                || settings.AuthSysCredentials.UserId != 1001
+                || settings.AuthSysCredentials.GroupId != 1002
+                || settings.AuthSysCredentials.SupplementaryGroupIds.Count != 2
+                || settings.AuthSysCredentials.SupplementaryGroupIds[0] != 1003
+                || settings.AuthSysCredentials.SupplementaryGroupIds[1] != 1004)
+            {
+                throw new InvalidOperationException("Expected the client builder to preserve configured AUTH_SYS identity values.");
+            }
+
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.ClientAuthSys", Guid.NewGuid().ToString("N"));
+            string sourceRoot = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(sourceRoot);
+
+                Dictionary<string, NfsPathKind> pathKinds = new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [sourceRoot] = NfsPathKind.Directory,
+                };
+
+                OpenNfsServer server = new OpenNfsServerBuilder()
+                    .UseFileSystem(new DictionaryNfsFileSystem(pathKinds, new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)))
+                    .UseFileHandleProvider(new PersistentMappingHandleProvider(mappingPath))
+                    .AddExport("/export", sourceRoot)
+                    .Build();
+
+                await using OpenNfsTcpInteropHost host = OpenNfsTcpInteropHost.Start(server);
+                await using OpenNfsClient client = new OpenNfsClientBuilder()
+                    .WithServer("127.0.0.1", host.MountPort)
+                    .WithAuthSysCredentials(expectedMachineName, 1001, 1002, new uint[] { 1003, 1004 })
+                    .Build();
+
+                await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+                OpenNfsMountV3Result mountResult = await client.Exports.MountV3Async("/export", cancellationToken).ConfigureAwait(false);
+                if (!mountResult.IsSuccess)
+                {
+                    throw new InvalidOperationException("Expected the AUTH_SYS credential test to mount the export successfully.");
+                }
+
+                IReadOnlyList<OpenNfsMountedExportV3Entry> mountedExports = await client.Exports.ListMountsV3Async(cancellationToken).ConfigureAwait(false);
+                OpenNfsMountedExportV3Entry? mountedExport = mountedExports.SingleOrDefault(
+                    static entry => string.Equals(entry.ExportPath, "/export", StringComparison.Ordinal));
+
+                if (mountedExport is null)
+                {
+                    throw new InvalidOperationException("Expected MOUNT v3 DUMP to include the mounted export entry.");
+                }
+
+                if (!string.Equals(mountedExport.HostName, expectedMachineName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected MOUNT v3 DUMP to surface the configured AUTH_SYS machine name '"
+                        + expectedMachineName
+                        + "', but found '"
+                        + mountedExport.HostName
+                        + "'.");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
         }
 
         private static async Task ExecuteMountSessionSupportsPathFirstReadWriteAndMetadataAsync(CancellationToken cancellationToken)
@@ -327,6 +503,277 @@ namespace Test.Shared
             }
         }
 
+        private static async Task ExecuteMountSessionMaintainsSameSessionMutationConsistencyAsync(CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.ClientSessionConsistency", Guid.NewGuid().ToString("N"));
+            string sourceRoot = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(sourceRoot, "docs"));
+
+                Dictionary<string, NfsPathKind> pathKinds = new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [sourceRoot] = NfsPathKind.Directory,
+                    [Path.Combine(sourceRoot, "docs")] = NfsPathKind.Directory,
+                    [Path.Combine(sourceRoot, "docs", "seed.txt")] = NfsPathKind.File,
+                };
+
+                Dictionary<string, byte[]> fileContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [Path.Combine(sourceRoot, "docs", "seed.txt")] = Encoding.UTF8.GetBytes("seed-value"),
+                };
+
+                OpenNfsServer server = new OpenNfsServerBuilder()
+                    .UseFileSystem(new SerializedNfsFileSystem(new DictionaryNfsFileSystem(pathKinds, fileContents)))
+                    .UseFileHandleProvider(new PersistentMappingHandleProvider(mappingPath))
+                    .AddExport("/export", sourceRoot)
+                    .Build();
+
+                await using OpenNfsTcpInteropHost host = OpenNfsTcpInteropHost.Start(server);
+                await using MountedSessionContext mountedSession = await CreateMountedSessionAsync(host, cancellationToken).ConfigureAwait(false);
+                OpenNfsMountSession session = mountedSession.Session;
+
+                await session.Directories.CreateFileAsync("/docs/live.txt", failIfExists: true, cancellationToken).ConfigureAwait(false);
+                await session.Files.WriteAllBytesAsync(
+                    "/docs/live.txt",
+                    Encoding.UTF8.GetBytes("session-live"),
+                    OpenNfsWriteStability.FileSync,
+                    cancellationToken).ConfigureAwait(false);
+
+                byte[] currentBytes = await session.Files.ReadAllBytesAsync("/docs/live.txt", cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(Encoding.UTF8.GetString(currentBytes), "session-live", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Expected a mounted session to observe its own newly written file contents without reopening the export.");
+                }
+
+                IReadOnlyList<OpenNfsV3DirectoryEntry> entriesAfterCreate = await session.Directories.ListAsync("/docs", cancellationToken).ConfigureAwait(false);
+                if (!entriesAfterCreate.Any(static entry => string.Equals(entry.Name, "live.txt", StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Expected a mounted session to observe its own newly created directory entry.");
+                }
+
+                await session.Directories.DeleteFileAsync("/docs/live.txt", cancellationToken).ConfigureAwait(false);
+                IReadOnlyList<OpenNfsV3DirectoryEntry> entriesAfterDelete = await session.Directories.ListAsync("/docs", cancellationToken).ConfigureAwait(false);
+                if (entriesAfterDelete.Any(static entry => string.Equals(entry.Name, "live.txt", StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("Expected a mounted session to stop surfacing a deleted entry immediately after the same-session delete.");
+                }
+
+                try
+                {
+                    _ = await session.Files.ReadAllBytesAsync("/docs/live.txt", cancellationToken).ConfigureAwait(false);
+                    throw new InvalidOperationException("Expected a deleted mounted-session path read to fail with a clear NFSv3 status.");
+                }
+                catch (OpenNfsV3StatusException exception)
+                {
+                    if (exception.Status != OpenNfsV3Status.NoEntry
+                        || exception.Category != OpenNfsErrorCategory.NotFound
+                        || !exception.Message.Contains("NoEntry", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("Expected the deleted mounted-session path read to preserve a typed NFSv3 NoEntry failure.");
+                    }
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
+        }
+
+        private static async Task ExecuteMountSessionSupportsConcurrentPathOperationsAndRejectsRelativeNavigationAsync(CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.ClientSessionConcurrent", Guid.NewGuid().ToString("N"));
+            string sourceRoot = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(sourceRoot, "docs"));
+
+                Dictionary<string, NfsPathKind> pathKinds = new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [sourceRoot] = NfsPathKind.Directory,
+                    [Path.Combine(sourceRoot, "docs")] = NfsPathKind.Directory,
+                };
+                Dictionary<string, byte[]> fileContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+
+                for (int index = 0; index < 8; index++)
+                {
+                    string filePath = Path.Combine(sourceRoot, "docs", "file-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt");
+                    pathKinds[filePath] = NfsPathKind.File;
+                    fileContents[filePath] = Encoding.UTF8.GetBytes("payload-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+
+                OpenNfsServer server = new OpenNfsServerBuilder()
+                    .UseFileSystem(new SerializedNfsFileSystem(new DictionaryNfsFileSystem(pathKinds, fileContents)))
+                    .UseFileHandleProvider(new PersistentMappingHandleProvider(mappingPath))
+                    .AddExport("/export", sourceRoot)
+                    .Build();
+
+                await using OpenNfsTcpInteropHost host = OpenNfsTcpInteropHost.Start(server);
+                await using MountedSessionContext mountedSession = await CreateMountedSessionAsync(host, cancellationToken).ConfigureAwait(false);
+                OpenNfsMountSession session = mountedSession.Session;
+
+                List<Task> operations = new List<Task>();
+                for (int index = 0; index < 8; index++)
+                {
+                    int capturedIndex = index;
+                    operations.Add(Task.Run(async () =>
+                    {
+                        byte[] payload = await session.Files.ReadAllBytesAsync(
+                            "/docs/file-" + capturedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt",
+                            cancellationToken).ConfigureAwait(false);
+
+                        if (!string.Equals(
+                            Encoding.UTF8.GetString(payload),
+                            "payload-" + capturedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Expected concurrent mounted-session reads to preserve the correct payload for each path.");
+                        }
+                    }, cancellationToken));
+                }
+
+                for (int index = 0; index < 4; index++)
+                {
+                    int capturedIndex = index;
+                    operations.Add(Task.Run(async () =>
+                    {
+                        string path = "/concurrent-" + capturedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt";
+                        string payloadText = "concurrent-write-" + capturedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                        await session.Directories.CreateFileAsync(path, failIfExists: true, cancellationToken).ConfigureAwait(false);
+                        await session.Files.WriteAllBytesAsync(
+                            path,
+                            Encoding.UTF8.GetBytes(payloadText),
+                            OpenNfsWriteStability.FileSync,
+                            cancellationToken).ConfigureAwait(false);
+
+                        byte[] payload = await session.Files.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+                        if (!string.Equals(Encoding.UTF8.GetString(payload), payloadText, StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException("Expected concurrent mounted-session writes to be readable through the same session.");
+                        }
+
+                        await session.Directories.DeleteFileAsync(path, cancellationToken).ConfigureAwait(false);
+                    }, cancellationToken));
+                }
+
+                await Task.WhenAll(operations).ConfigureAwait(false);
+
+                try
+                {
+                    _ = await session.Files.ReadAllBytesAsync("../escape.txt", cancellationToken).ConfigureAwait(false);
+                    throw new InvalidOperationException("Expected mounted sessions to reject relative navigation segments.");
+                }
+                catch (ArgumentException exception)
+                {
+                    if (!exception.Message.Contains("Relative path navigation segments", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException("Expected the mounted-session relative-path failure to explain that '.' and '..' are unsupported.");
+                    }
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
+        }
+
+        private static async Task<MountedSessionContext> CreateMountedSessionAsync(
+            OpenNfsTcpInteropHost host,
+            CancellationToken cancellationToken)
+        {
+            await using OpenNfsClient mountClient = new OpenNfsClientBuilder()
+                .WithServer("127.0.0.1", host.MountPort)
+                .Build();
+            await mountClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+            OpenNfsMountV3Result mountResult =
+                await mountClient.Exports.MountV3Async("/export", cancellationToken).ConfigureAwait(false);
+            if (!mountResult.IsSuccess)
+            {
+                throw new InvalidOperationException("Expected mounted-session setup to obtain a successful MOUNT v3 root handle.");
+            }
+
+            OpenNfsClient nfsClient = new OpenNfsClientBuilder()
+                .WithServer("127.0.0.1", host.NfsPort)
+                .Build();
+            await nfsClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            return new MountedSessionContext(nfsClient, nfsClient.CreateMountSession("/export", mountResult));
+        }
+
+        private sealed class MountedSessionContext : IAsyncDisposable
+        {
+            private readonly OpenNfsClient _client;
+
+            internal MountedSessionContext(OpenNfsClient client, OpenNfsMountSession session)
+            {
+                _client = client;
+                Session = session;
+            }
+
+            internal OpenNfsMountSession Session { get; }
+
+            public async ValueTask DisposeAsync()
+            {
+                await Session.DisposeAsync().ConfigureAwait(false);
+                await _client.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
+        private static async Task ExecuteReadmeClientSnippetCompilesFromCleanConsumerAppAsync(CancellationToken cancellationToken)
+        {
+            string programSource = ReadmeSnippetSupport.ExtractClientExampleSnippet();
+
+            await using ExternalPackageConsumerProject project = await ExternalPackageConsumerSupport.CreateSinglePackageConsoleAppAsync(
+                Path.Combine("src", "OpenNFS.Client", "OpenNFS.Client.csproj"),
+                "OpenNFS.Client",
+                programSource,
+                cancellationToken).ConfigureAwait(false);
+
+            _ = await DotnetCli.RunCheckedAsync(
+                new[]
+                {
+                    "build",
+                    "--disable-build-servers",
+                    project.ProjectPath,
+                    "-c",
+                    "Release",
+                    "--no-restore",
+                },
+                project.ProjectDirectory,
+                cancellationToken,
+                timeout: TimeSpan.FromMinutes(3)).ConfigureAwait(false);
+        }
+
+        private static void AssertEditorBrowsableState(MethodInfo? methodInfo, EditorBrowsableState expectedState, string displayName)
+        {
+            if (methodInfo is null)
+            {
+                throw new InvalidOperationException("Expected method '" + displayName + "' to exist on the current public client surface.");
+            }
+
+            EditorBrowsableAttribute? attribute = methodInfo.GetCustomAttribute<EditorBrowsableAttribute>();
+            if (attribute is null || attribute.State != expectedState)
+            {
+                throw new InvalidOperationException(
+                    "Expected method '"
+                    + displayName
+                    + "' to be marked with EditorBrowsableState."
+                    + expectedState
+                    + " on the current compatibility surface.");
+            }
+        }
+
         private static async Task ExecuteMountAsyncUsesDedicatedMountEndpointAsync(CancellationToken cancellationToken)
         {
             string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.ClientMountAsync", Guid.NewGuid().ToString("N"));
@@ -406,12 +853,14 @@ namespace Test.Shared
                     _ = await client.MountAsync("/export", cancellationToken).ConfigureAwait(false);
                     throw new InvalidOperationException("Expected MountAsync to throw when the server denies the mount.");
                 }
-                catch (InvalidOperationException exception)
+                catch (OpenNfsMountV3StatusException exception)
                 {
-                    if (!exception.Message.Contains("AccessDenied", StringComparison.Ordinal)
-                        || !exception.Message.Contains("/export", StringComparison.Ordinal))
+                    if (exception.Status != OpenNfsMountV3Status.AccessDenied
+                        || exception.Category != OpenNfsErrorCategory.AccessDenied
+                        || !string.Equals(exception.ExportPath, "/export", StringComparison.Ordinal)
+                        || !exception.Message.Contains("AccessDenied", StringComparison.Ordinal))
                     {
-                        throw new InvalidOperationException("Expected denied MountAsync failures to include both the export path and the MOUNT v3 status.");
+                        throw new InvalidOperationException("Expected denied MountAsync failures to surface a typed MOUNT v3 status exception with the export path and normalized category.");
                     }
                 }
             }
@@ -439,37 +888,51 @@ public static class Program
 {
     public static async Task<int> Main()
     {
-        int closedPort = ReserveClosedPort();
+        using TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int listenerPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        Task listenerTask = RunListenerAsync(listener);
 
-        await using OpenNfsClient client = new OpenNfsClientBuilder()
-            .WithServer("127.0.0.1", closedPort)
-            .WithMountPort(closedPort)
-            .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpOnly)
-            .Build();
+        try
+        {
+            await using OpenNfsClient client = new OpenNfsClientBuilder()
+                .WithServer("127.0.0.1", listenerPort)
+                .WithMountPort(listenerPort)
+                .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpOnly)
+                .WithConnectionTimeout(TimeSpan.FromSeconds(2))
+                .WithResponseTimeout(TimeSpan.FromSeconds(2))
+                .Build();
 
-        await client.ConnectAsync(CancellationToken.None);
+            await client.ConnectAsync(CancellationToken.None);
 
-        await ExpectTransportFailureAsync(
-            async () => { _ = await client.Exports.MountV3Async("/export", CancellationToken.None); },
-            "MOUNT v3");
-        await ExpectTransportFailureAsync(
-            async () => { _ = await client.Directories.GetRootV40Async(CancellationToken.None); },
-            "NFSv4.0 root discovery");
+            await ExpectExecutionFailureAsync(
+                async () => { _ = await client.Exports.MountV3Async("/export", CancellationToken.None); },
+                "MOUNT v3");
+            await ExpectExecutionFailureAsync(
+                async () => { _ = await client.Directories.GetRootV40Async(CancellationToken.None); },
+                "NFSv4.0 root discovery");
 
-        Console.WriteLine("CLIENT PACKAGE EXECUTION OK");
-        return 0;
+            Console.WriteLine("CLIENT PACKAGE EXECUTION OK");
+            return 0;
+        }
+        finally
+        {
+            listener.Stop();
+            await listenerTask;
+        }
     }
 
-    private static async Task ExpectTransportFailureAsync(Func<Task> operation, string operationName)
+    private static async Task ExpectExecutionFailureAsync(Func<Task> operation, string operationName)
     {
         try
         {
             await operation();
-            throw new InvalidOperationException("Expected " + operationName + " to fail against a deliberately closed loopback port.");
+            throw new InvalidOperationException("Expected " + operationName + " to fail against the disposable loopback listener.");
         }
-        catch (IOException exception)
+        catch (Exception exception) when (string.Equals(exception.GetType().FullName, "OpenNFS.Client.OpenNfsClientIoException", StringComparison.Ordinal))
         {
-            if (!exception.Message.Contains("failed", StringComparison.Ordinal))
+            if (!exception.Message.Contains("failed", StringComparison.Ordinal)
+                && !exception.Message.Contains("reset", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
                     "Expected " + operationName + " to reach the transport layer before failing, but received: "
@@ -477,20 +940,38 @@ public static class Program
                     exception);
             }
         }
+        catch (Exception exception)
+        {
+            if (!string.Equals(exception.GetType().FullName, "OpenNFS.Client.OpenNfsClientProtocolException", StringComparison.Ordinal)
+                && !exception.Message.Contains("RPC reply envelope", StringComparison.Ordinal)
+                && !exception.Message.Contains("configured timeout", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Expected " + operationName + " to fail after entering the packaged execution path, but received "
+                    + exception.GetType().FullName
+                    + ": "
+                    + exception.Message,
+                    exception);
+            }
+        }
     }
 
-    private static int ReserveClosedPort()
+    private static async Task RunListenerAsync(TcpListener listener)
     {
-        TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-
-        try
+        for (int index = 0; index < 2; index++)
         {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
+            try
+            {
+                using TcpClient tcpClient = await listener.AcceptTcpClientAsync();
+            }
+            catch (SocketException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
         }
     }
 }
@@ -583,6 +1064,104 @@ public static class Program
                     + "stderr:"
                     + Environment.NewLine
                     + result.StandardError);
+            }
+        }
+
+        private static async Task ExecuteTryLifecycleAndMountSurfacesTypedResultsAsync(CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.ClientTryMount", Guid.NewGuid().ToString("N"));
+            string sourceRoot = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(sourceRoot);
+
+                OpenNfsServer server = new OpenNfsServerBuilder()
+                    .UseLocalFileSystem()
+                    .UseFileHandleProvider(new PersistentMappingHandleProvider(mappingPath))
+                    .UseMountAuthorization(new StaticMountAuthorization(
+                        new Dictionary<string, NfsMountAccessDisposition>(StringComparer.Ordinal)
+                        {
+                            ["/export"] = NfsMountAccessDisposition.Allow,
+                            ["/denied"] = NfsMountAccessDisposition.Deny,
+                        }))
+                    .AddExport("/export", sourceRoot)
+                    .AddExport("/denied", sourceRoot)
+                    .Build();
+
+                await using OpenNfsTcpInteropHost host = OpenNfsTcpInteropHost.Start(server);
+
+                await using OpenNfsClient client = new OpenNfsClientBuilder()
+                    .WithServer("127.0.0.1", host.NfsPort)
+                    .WithMountPort(host.MountPort)
+                    .Build();
+
+                OpenNfsClientResult preConnectFailure = await client.TryMountAsync("/export", cancellationToken).ConfigureAwait(false);
+                if (preConnectFailure.IsSuccess
+                    || preConnectFailure.Exception is not OpenNfsClientStateException
+                    || preConnectFailure.ErrorCategory != OpenNfsErrorCategory.Unknown)
+                {
+                    throw new InvalidOperationException("Expected TryMountAsync before ConnectAsync to return a typed client-state failure.");
+                }
+
+                OpenNfsClientResult connectResult = await client.TryConnectAsync(cancellationToken).ConfigureAwait(false);
+                if (!connectResult.IsSuccess)
+                {
+                    throw new InvalidOperationException("Expected TryConnectAsync to succeed against the current in-memory host.");
+                }
+
+                OpenNfsClientResult<IReadOnlyList<OpenNfsExportV3Entry>> exportsResult =
+                    await client.Exports.TryListExportsV3Async(cancellationToken).ConfigureAwait(false);
+                if (!exportsResult.IsSuccess
+                    || exportsResult.Value is null
+                    || exportsResult.Value.Count != 1
+                    || !string.Equals(exportsResult.Value[0].ExportPath, "/export", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Expected TryListExportsV3Async to return the visible export set on success.");
+                }
+
+                OpenNfsClientResult<OpenNfsMountSession> successMount =
+                    await client.TryMountAsync("/export", cancellationToken).ConfigureAwait(false);
+                if (!successMount.IsSuccess
+                    || successMount.Value is null
+                    || !string.Equals(successMount.Value.ExportPath, "/export", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Expected TryMountAsync to return a mounted session on success.");
+                }
+
+                await successMount.Value.DisposeAsync().ConfigureAwait(false);
+
+                OpenNfsClientResult<OpenNfsMountSession> deniedMount =
+                    await client.TryMountAsync("/denied", cancellationToken).ConfigureAwait(false);
+                if (deniedMount.IsSuccess
+                    || deniedMount.Exception is not OpenNfsMountV3StatusException mountException
+                    || mountException.Status != OpenNfsMountV3Status.AccessDenied
+                    || deniedMount.MountV3Status != OpenNfsMountV3Status.AccessDenied
+                    || deniedMount.ErrorCategory != OpenNfsErrorCategory.AccessDenied)
+                {
+                    throw new InvalidOperationException("Expected TryMountAsync to return a typed MOUNT v3 access-denied failure envelope.");
+                }
+
+                OpenNfsClientResult disconnectResult = await client.TryDisconnectAsync(cancellationToken).ConfigureAwait(false);
+                if (!disconnectResult.IsSuccess)
+                {
+                    throw new InvalidOperationException("Expected TryDisconnectAsync to succeed after a normal client lifetime.");
+                }
+
+                OpenNfsClientResult reconnectFailure = await client.TryConnectAsync(cancellationToken).ConfigureAwait(false);
+                if (reconnectFailure.IsSuccess
+                    || reconnectFailure.Exception is not OpenNfsClientStateException)
+                {
+                    throw new InvalidOperationException("Expected TryConnectAsync after CloseAsync/DisconnectAsync to return a typed client-state failure.");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
             }
         }
     }

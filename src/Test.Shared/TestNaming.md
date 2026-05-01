@@ -1,6 +1,9 @@
 # OpenNFS Test Naming
 
-OpenNFS uses Touchstone suite descriptors in `Test.Shared` and exposes the same suite inventory through the automated runner, the xUnit adapter, and the NUnit adapter.
+OpenNFS uses Touchstone suite descriptors in `Test.Shared`.
+
+- `Test.Automated` runs the full shared catalog.
+- `Test.Xunit` and `Test.Nunit` run the fast adapter-smoke subset built from the unit-tagged cases.
 
 ## Naming rules
 
@@ -12,4 +15,7 @@ OpenNFS uses Touchstone suite descriptors in `Test.Shared` and exposes the same 
 ## Current baseline suites
 
 - `RpcXdrSuites`
-
+- `FailureSuites`
+- `SecuritySuites`
+- `NfsV41Suites`
+- `NfsV42Suites`

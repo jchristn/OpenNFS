@@ -16,9 +16,9 @@ namespace Test.Shared.Infrastructure
         public const string LinuxNfsV40ServerImage = "opennfs-test/linux-nfs-server-ganesha-v4:local";
         public const string LinuxKnfsdServerImage = "opennfs-test/linux-nfs-server-knfsd:local";
 
-        public static async Task EnsureBuiltAsync(CancellationToken cancellationToken)
+        public static async Task EnsureBuiltAsync(CancellationToken cancellationToken, bool forceRebuild = false)
         {
-            if (_built)
+            if (_built && !forceRebuild)
             {
                 return;
             }
@@ -27,7 +27,7 @@ namespace Test.Shared.Infrastructure
 
             try
             {
-                if (_built)
+                if (_built && !forceRebuild)
                 {
                     return;
                 }

@@ -266,6 +266,319 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV40Suites",
+                        caseId: "AllAdvertisedOpsBound",
+                        displayName: "NFSv4.0 COMPOUND binds every legal v4.0 core operation explicitly",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            DictionaryNfsFileSystem fileSystem = new DictionaryNfsFileSystem(
+                                new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                                {
+                                    [@"C:\exports"] = NfsPathKind.Directory,
+                                });
+
+                            OpenNfsServer server = new OpenNfsServerBuilder()
+                                .UseFileSystem(fileSystem)
+                                .AddExport("/", @"C:\exports")
+                                .Build();
+
+                            Nfs40CompoundExecutor executor = new Nfs40CompoundExecutor(server);
+                            foreach (nfs_opnum4 operationNumber in Enum.GetValues<nfs_opnum4>())
+                            {
+                                if (operationNumber == nfs_opnum4.OP_ILLEGAL)
+                                {
+                                    continue;
+                                }
+
+                                COMPOUND4res result = await executor.ExecuteAsync(
+                                    new COMPOUND4args
+                                    {
+                                        tag = new utf8str_cs
+                                        {
+                                            Value = new utf8string
+                                            {
+                                                Value = Encoding.ASCII.GetBytes(operationNumber.ToString()),
+                                            },
+                                        },
+                                        minorversion = 0U,
+                                        argarray = new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = operationNumber,
+                                            },
+                                        },
+                                    },
+                                    cancellationToken).ConfigureAwait(false);
+
+                                if (result.resarray is null
+                                    || result.resarray.Length != 1
+                                    || result.resarray[0].resop != operationNumber
+                                    || result.resarray[0].resop == nfs_opnum4.OP_ILLEGAL
+                                    || result.status == nfsstat4.NFS4ERR_OP_ILLEGAL)
+                                {
+                                    throw new InvalidOperationException(
+                                        "Expected legal NFSv4.0 operation "
+                                        + operationNumber
+                                        + " to bind to an explicit result arm instead of the generic OP_ILLEGAL path.");
+                                }
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV40Suites",
+                        caseId: "CompoundAdditionalCoreOperationsPositiveAndNegative",
+                        displayName: "NFSv4.0 COMPOUND serves explicit public-root, verify, and capability-gated core operation results",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            DictionaryNfsFileSystem fileSystem = new DictionaryNfsFileSystem(
+                                new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                                {
+                                    [@"C:\exports"] = NfsPathKind.Directory,
+                                });
+
+                            OpenNfsServer server = new OpenNfsServerBuilder()
+                                .UseFileSystem(fileSystem)
+                                .AddExport("/", @"C:\exports")
+                                .Build();
+
+                            Nfs40CompoundService service = new Nfs40CompoundService(server);
+                            NfsFileHandle rootHandle = await server.CreateFileHandleAsync(
+                                new NfsFileHandleTarget("/", @"C:\exports"),
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res publicRootResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x70010009,
+                                        "putpubfh-verify-positive",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_PUTPUBFH,
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_VERIFY,
+                                                opverify = new VERIFY4args
+                                                {
+                                                    obj_attributes = CreateTypeAttributes(nfs_ftype4.NF4DIR),
+                                                },
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_GETFH,
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            byte[]? publicHandleBytes = publicRootResult.resarray?[2].opgetfh?.resok4?.@object?.Value;
+                            if (publicRootResult.status != nfsstat4.NFS4_OK
+                                || publicRootResult.resarray is null
+                                || publicRootResult.resarray.Length != 3
+                                || publicRootResult.resarray[0].opputpubfh?.status != nfsstat4.NFS4_OK
+                                || publicRootResult.resarray[1].opverify?.status != nfsstat4.NFS4_OK
+                                || publicRootResult.resarray[2].opgetfh?.status != nfsstat4.NFS4_OK
+                                || publicHandleBytes is null
+                                || !publicHandleBytes.AsSpan().SequenceEqual(rootHandle.ToArray()))
+                            {
+                                throw new InvalidOperationException("Expected PUTPUBFH to expose the current public/root handle and allow a matching VERIFY sequence to succeed.");
+                            }
+
+                            COMPOUND4res nverifyDifferentResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000A,
+                                        "nverify-positive",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_PUTPUBFH,
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_NVERIFY,
+                                                opnverify = new NVERIFY4args
+                                                {
+                                                    obj_attributes = CreateTypeAttributes(nfs_ftype4.NF4REG),
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (nverifyDifferentResult.status != nfsstat4.NFS4_OK
+                                || nverifyDifferentResult.resarray is null
+                                || nverifyDifferentResult.resarray.Length != 2
+                                || nverifyDifferentResult.resarray[1].opnverify?.status != nfsstat4.NFS4_OK)
+                            {
+                                throw new InvalidOperationException("Expected NVERIFY to succeed when the supplied attribute payload differs from the current object.");
+                            }
+
+                            COMPOUND4res verifyMismatchResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000B,
+                                        "verify-negative",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_PUTPUBFH,
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_VERIFY,
+                                                opverify = new VERIFY4args
+                                                {
+                                                    obj_attributes = CreateTypeAttributes(nfs_ftype4.NF4REG),
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (verifyMismatchResult.status != nfsstat4.NFS4ERR_NOT_SAME
+                                || verifyMismatchResult.resarray is null
+                                || verifyMismatchResult.resarray.Length != 2
+                                || verifyMismatchResult.resarray[1].opverify?.status != nfsstat4.NFS4ERR_NOT_SAME)
+                            {
+                                throw new InvalidOperationException("Expected VERIFY to return NFS4ERR_NOT_SAME when the supplied attribute payload does not match the current object.");
+                            }
+
+                            COMPOUND4res nverifySameResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000C,
+                                        "nverify-negative",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_PUTPUBFH,
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_NVERIFY,
+                                                opnverify = new NVERIFY4args
+                                                {
+                                                    obj_attributes = CreateTypeAttributes(nfs_ftype4.NF4DIR),
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (nverifySameResult.status != nfsstat4.NFS4ERR_SAME
+                                || nverifySameResult.resarray is null
+                                || nverifySameResult.resarray.Length != 2
+                                || nverifySameResult.resarray[1].opnverify?.status != nfsstat4.NFS4ERR_SAME)
+                            {
+                                throw new InvalidOperationException("Expected NVERIFY to return NFS4ERR_SAME when the supplied attribute payload matches the current object.");
+                            }
+
+                            COMPOUND4res openAttributeResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000D,
+                                        "openattr-notsupp",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_PUTPUBFH,
+                                            },
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_OPENATTR,
+                                                opopenattr = new OPENATTR4args
+                                                {
+                                                    createdir = false,
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (openAttributeResult.status != nfsstat4.NFS4ERR_NOTSUPP
+                                || openAttributeResult.resarray is null
+                                || openAttributeResult.resarray.Length != 2
+                                || openAttributeResult.resarray[1].opopenattr?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                            {
+                                throw new InvalidOperationException("Expected OPENATTR to return an explicit NOTSUPP path when named attributes are not advertised.");
+                            }
+
+                            COMPOUND4res delegationPurgeResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000E,
+                                        "delegpurge-notsupp",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_DELEGPURGE,
+                                                opdelegpurge = new DELEGPURGE4args
+                                                {
+                                                    clientid = new clientid4
+                                                    {
+                                                        Value = 0UL,
+                                                    },
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (delegationPurgeResult.status != nfsstat4.NFS4ERR_NOTSUPP
+                                || delegationPurgeResult.resarray is null
+                                || delegationPurgeResult.resarray.Length != 1
+                                || delegationPurgeResult.resarray[0].opdelegpurge?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                            {
+                                throw new InvalidOperationException("Expected DELEGPURGE to bind to an explicit NOTSUPP capability-gated response on the current delegation surface.");
+                            }
+
+                            COMPOUND4res releaseLockOwnerResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x7001000F,
+                                        "release-lockowner-notsupp",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_RELEASE_LOCKOWNER,
+                                                oprelease_lockowner = new RELEASE_LOCKOWNER4args
+                                                {
+                                                    lock_owner = new lock_owner4
+                                                    {
+                                                        clientid = new clientid4
+                                                        {
+                                                            Value = 0UL,
+                                                        },
+                                                        owner = new byte[] { 0x01 },
+                                                    },
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (releaseLockOwnerResult.status != nfsstat4.NFS4ERR_NOTSUPP
+                                || releaseLockOwnerResult.resarray is null
+                                || releaseLockOwnerResult.resarray.Length != 1
+                                || releaseLockOwnerResult.resarray[0].oprelease_lockowner?.status != nfsstat4.NFS4ERR_NOTSUPP)
+                            {
+                                throw new InvalidOperationException("Expected RELEASE_LOCKOWNER to bind to an explicit NOTSUPP response instead of falling through to OP_ILLEGAL.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV40Suites",
                         caseId: "CompoundReadOnlyOperationsPositive",
                         displayName: "NFSv4.0 COMPOUND serves successful read-only lookup, readdir, read, and readlink flows",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -3485,6 +3798,307 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV40Suites",
+                        caseId: "LeaseExpiryRecovery",
+                        displayName: "NFSv4.0 clients recover from lease expiry by re-registering and reopening clean state",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            MutableClock clock = new MutableClock(new DateTimeOffset(2026, 4, 30, 10, 0, 0, TimeSpan.Zero));
+                            (_, Nfs40CompoundService service, NfsFileHandle docsHandle, NfsFileHandle notesHandle) =
+                                await CreateLockingServiceAsync(
+                                    cancellationToken,
+                                    clock,
+                                    leaseWindow: TimeSpan.FromMinutes(5),
+                                    gracePeriodDuration: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+
+                            (ulong initialClientId, stateid4 initialOpenStateId) = await CreateConfirmedOpenStateForClientAsync(
+                                service,
+                                docsHandle,
+                                "suite-lease-recovery-client",
+                                new byte[] { 151, 152, 153, 154, 155, 156, 157, 158 },
+                                "owner-lease-recovery",
+                                0x700100D0,
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res initialLockResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x700100D4,
+                                        "lease-recovery-lock-before-expiry",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(notesHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_LOCK,
+                                                oplock = CreateLockFromOpenArguments(
+                                                    initialOpenStateId,
+                                                    3U,
+                                                    initialClientId,
+                                                    "lock-lease-recovery",
+                                                    1U,
+                                                    nfs_lock_type4.WRITE_LT,
+                                                    0UL,
+                                                    5UL),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+                            if (initialLockResult.status != nfsstat4.NFS4_OK)
+                            {
+                                throw new InvalidOperationException("Expected the initial NFSv4.0 lease-recovery lock setup to succeed before lease expiry.");
+                            }
+
+                            clock.Advance(TimeSpan.FromMinutes(6));
+
+                            (ulong recoveredClientId, stateid4 recoveredOpenStateId) = await CreateConfirmedOpenStateForClientAsync(
+                                service,
+                                docsHandle,
+                                "suite-lease-recovery-client",
+                                new byte[] { 151, 152, 153, 154, 155, 156, 157, 158 },
+                                "owner-lease-recovery",
+                                0x700100E0,
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res renewRecoveredClientResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x700100E4,
+                                        "lease-recovery-renew",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_RENEW,
+                                                oprenew = new RENEW4args
+                                                {
+                                                    clientid = new clientid4
+                                                    {
+                                                        Value = recoveredClientId,
+                                                    },
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            COMPOUND4res recoveredLockResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x700100E5,
+                                        "lease-recovery-lock-after-reregister",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(notesHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_LOCK,
+                                                oplock = CreateLockFromOpenArguments(
+                                                    recoveredOpenStateId,
+                                                    3U,
+                                                    recoveredClientId,
+                                                    "lock-lease-recovery",
+                                                    1U,
+                                                    nfs_lock_type4.WRITE_LT,
+                                                    0UL,
+                                                    5UL),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+                            stateid4 recoveredLockStateId = recoveredLockResult.resarray?[1].oplock?.resok4?.lock_stateid
+                                ?? throw new InvalidOperationException("Expected recovered lease flow LOCK to return a lock stateid.");
+
+                            COMPOUND4res recoveredUnlockResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x700100E6,
+                                        "lease-recovery-unlock-after-reregister",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(notesHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_LOCKU,
+                                                oplocku = CreateUnlockArguments(
+                                                    recoveredLockStateId,
+                                                    2U,
+                                                    nfs_lock_type4.WRITE_LT,
+                                                    0UL,
+                                                    5UL),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            COMPOUND4res recoveredCloseResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x700100E7,
+                                        "lease-recovery-close-after-reregister",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_CLOSE,
+                                                opclose = new CLOSE4args
+                                                {
+                                                    seqid = CreateSequenceId(4U),
+                                                    open_stateid = recoveredOpenStateId,
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (recoveredClientId == initialClientId
+                                || renewRecoveredClientResult.status != nfsstat4.NFS4_OK
+                                || recoveredLockResult.status != nfsstat4.NFS4_OK
+                                || recoveredUnlockResult.status != nfsstat4.NFS4_OK
+                                || recoveredCloseResult.status != nfsstat4.NFS4_OK
+                                || recoveredCloseResult.resarray?[0].opclose?.open_stateid?.seqid != 3U)
+                            {
+                                throw new InvalidOperationException("Expected lease-expired NFSv4.0 clients to recover by re-registering, reopening, and completing fresh lock and close flows.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV40Suites",
+                        caseId: "LeaseExpiryRecoveryNegative",
+                        displayName: "NFSv4.0 surfaces BAD_STATEID and STALE_CLIENTID results before lease-expiry recovery",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            MutableClock clock = new MutableClock(new DateTimeOffset(2026, 4, 30, 11, 0, 0, TimeSpan.Zero));
+                            (_, Nfs40CompoundService service, NfsFileHandle docsHandle, NfsFileHandle notesHandle) =
+                                await CreateLockingServiceAsync(
+                                    cancellationToken,
+                                    clock,
+                                    leaseWindow: TimeSpan.FromMinutes(5),
+                                    gracePeriodDuration: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+
+                            (ulong expiredStateClientId, stateid4 expiredOpenStateId) = await CreateConfirmedOpenStateForClientAsync(
+                                service,
+                                docsHandle,
+                                "suite-lease-negative-state-client",
+                                new byte[] { 161, 162, 163, 164, 165, 166, 167, 168 },
+                                "owner-lease-negative-state",
+                                0x700100F0,
+                                cancellationToken).ConfigureAwait(false);
+                            (ulong expiredRenewClientId, _) = await CreateClientSessionAsync(
+                                service,
+                                "suite-lease-negative-renew-client",
+                                new byte[] { 171, 172, 173, 174, 175, 176, 177, 178 },
+                                0x70010100,
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res initialLockResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x70010104,
+                                        "lease-negative-lock-before-expiry",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(notesHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_LOCK,
+                                                oplock = CreateLockFromOpenArguments(
+                                                    expiredOpenStateId,
+                                                    3U,
+                                                    expiredStateClientId,
+                                                    "lock-lease-negative-state",
+                                                    1U,
+                                                    nfs_lock_type4.WRITE_LT,
+                                                    0UL,
+                                                    5UL),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+                            stateid4 expiredLockStateId = initialLockResult.resarray?[1].oplock?.resok4?.lock_stateid
+                                ?? throw new InvalidOperationException("Expected the lease-expiry negative setup lock to return a lock stateid.");
+
+                            clock.Advance(TimeSpan.FromMinutes(6));
+
+                            COMPOUND4res expiredUnlockResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x70010105,
+                                        "lease-negative-unlock-expired",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(notesHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_LOCKU,
+                                                oplocku = CreateUnlockArguments(
+                                                    expiredLockStateId,
+                                                    2U,
+                                                    nfs_lock_type4.WRITE_LT,
+                                                    0UL,
+                                                    5UL),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            COMPOUND4res expiredRenewResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x70010106,
+                                        "lease-negative-renew-expired",
+                                        0U,
+                                        new[]
+                                        {
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_RENEW,
+                                                oprenew = new RENEW4args
+                                                {
+                                                    clientid = new clientid4
+                                                    {
+                                                        Value = expiredRenewClientId,
+                                                    },
+                                                },
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            COMPOUND4res staleClientOpenResult = ReadCompoundReply(
+                                await service.DispatchAsync(
+                                    CreateCompoundCall(
+                                        0x70010107,
+                                        "lease-negative-open-stale-clientid",
+                                        0U,
+                                        new[]
+                                        {
+                                            CreatePutFileHandleArgop(docsHandle),
+                                            new nfs_argop4
+                                            {
+                                                argop = nfs_opnum4.OP_OPEN,
+                                                opopen = CreateOpenExistingArguments(
+                                                    expiredStateClientId,
+                                                    "owner-lease-negative-state",
+                                                    4U,
+                                                    (uint)Nfs40Constants.OPEN4_SHARE_ACCESS_BOTH,
+                                                    (uint)Nfs40Constants.OPEN4_SHARE_DENY_NONE,
+                                                    "notes.txt"),
+                                            },
+                                        }),
+                                    cancellationToken).ConfigureAwait(false));
+
+                            if (initialLockResult.status != nfsstat4.NFS4_OK
+                                || expiredUnlockResult.status != nfsstat4.NFS4ERR_BAD_STATEID
+                                || expiredRenewResult.status != nfsstat4.NFS4ERR_STALE_CLIENTID
+                                || staleClientOpenResult.status != nfsstat4.NFS4ERR_STALE_CLIENTID)
+                            {
+                                throw new InvalidOperationException("Expected lease-expired NFSv4.0 clients to surface BAD_STATEID and STALE_CLIENTID after expired state has been purged.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV40Suites",
                         caseId: "DelegationRecallRoundTripPositive",
                         displayName: "NFSv4.0 grants, recalls, and returns delegations before completing conflicting opens",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -4248,6 +4862,24 @@ namespace Test.Shared
             {
                 seqid = 0,
                 other = new byte[12],
+            };
+        }
+
+        private static fattr4 CreateTypeAttributes(nfs_ftype4 fileType)
+        {
+            XdrWriter writer = new XdrWriter();
+            new fattr4_type
+            {
+                Value = fileType,
+            }.WriteTo(writer);
+
+            return new fattr4
+            {
+                attrmask = Nfs40AttributeEncoder.CreateBitmap((int)Nfs40Constants.FATTR4_TYPE),
+                attr_vals = new attrlist4
+                {
+                    Value = writer.ToArray(),
+                },
             };
         }
 

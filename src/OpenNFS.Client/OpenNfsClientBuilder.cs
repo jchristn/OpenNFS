@@ -9,9 +9,11 @@ namespace OpenNFS.Client
     public sealed class OpenNfsClientBuilder
     {
         private OpenNfsAuthenticationFlavor _AuthenticationFlavor = OpenNfsAuthenticationFlavor.AuthSys;
+        private OpenNfsAuthSysCredentials _AuthSysCredentials = OpenNfsAuthSysCredentials.Default;
         private readonly List<OpenNfsEndpoint> _AlternateEndpoints = new List<OpenNfsEndpoint>();
         private TimeSpan _ConnectionTimeout = TimeSpan.FromSeconds(15);
         private OpenNfsEndpointSelectionMode _EndpointSelectionMode;
+        private IOpenNfsClientIdentityPolicy _IdentityPolicy = OpenNfsPassthroughIdentityPolicy.Default;
         private string? _MountServerHost;
         private int? _MountServerPort;
         private OpenNfsRetryPolicy _RetryPolicy = new OpenNfsRetryPolicy();
@@ -247,6 +249,52 @@ namespace OpenNFS.Client
         }
 
         /// <summary>
+        /// Sets the AUTH_SYS identity values used when <see cref="OpenNfsAuthenticationFlavor.AuthSys"/> is selected.
+        /// Calling this method also promotes AUTH_SYS as the active authentication flavor.
+        /// </summary>
+        /// <param name="credentials">Immutable AUTH_SYS identity values.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="credentials"/> is null.</exception>
+        public OpenNfsClientBuilder WithAuthSysCredentials(OpenNfsAuthSysCredentials credentials)
+        {
+            ArgumentNullException.ThrowIfNull(credentials);
+            _AuthSysCredentials = credentials;
+            _AuthenticationFlavor = OpenNfsAuthenticationFlavor.AuthSys;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the AUTH_SYS identity values used when <see cref="OpenNfsAuthenticationFlavor.AuthSys"/> is selected.
+        /// Calling this method also promotes AUTH_SYS as the active authentication flavor.
+        /// </summary>
+        /// <param name="machineName">AUTH_SYS machine name.</param>
+        /// <param name="userId">AUTH_SYS user ID.</param>
+        /// <param name="groupId">AUTH_SYS primary group ID.</param>
+        /// <param name="supplementaryGroupIds">Optional AUTH_SYS supplementary group IDs.</param>
+        /// <returns>The current builder instance.</returns>
+        public OpenNfsClientBuilder WithAuthSysCredentials(
+            string machineName,
+            uint userId,
+            uint groupId,
+            IReadOnlyList<uint>? supplementaryGroupIds = null)
+        {
+            return WithAuthSysCredentials(new OpenNfsAuthSysCredentials(machineName, userId, groupId, supplementaryGroupIds));
+        }
+
+        /// <summary>
+        /// Sets the client-side owner and owner-group normalization policy used by the grouped NFSv4 identity helpers.
+        /// </summary>
+        /// <param name="identityPolicy">Identity policy to use.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="identityPolicy"/> is null.</exception>
+        public OpenNfsClientBuilder WithIdentityPolicy(IOpenNfsClientIdentityPolicy identityPolicy)
+        {
+            ArgumentNullException.ThrowIfNull(identityPolicy);
+            _IdentityPolicy = identityPolicy;
+            return this;
+        }
+
+        /// <summary>
         /// Sets the retry policy.
         /// </summary>
         /// <param name="retryPolicy">Retry policy to use.</param>
@@ -289,11 +337,13 @@ namespace OpenNFS.Client
                 connectionTimeout: _ConnectionTimeout,
                 responseTimeout: _ResponseTimeout,
                 authenticationFlavor: _AuthenticationFlavor,
+                authSysCredentials: _AuthSysCredentials,
                 transportPolicy: _TransportPolicy,
                 alternateEndpoints: _AlternateEndpoints,
                 endpointSelectionMode: _EndpointSelectionMode,
                 retryPolicy: _RetryPolicy,
-                mountEndpoint: ResolveMountEndpoint());
+                mountEndpoint: ResolveMountEndpoint(),
+                identityPolicy: _IdentityPolicy);
         }
 
         /// <summary>

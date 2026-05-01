@@ -2,6 +2,7 @@ namespace OpenNFS.Client.Apis
 {
     using System;
     using System.Collections.Generic;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Client.Compound;
@@ -9,6 +10,7 @@ namespace OpenNFS.Client.Apis
     using OpenNFS.Client.Internal.TransportPipeline;
     using OpenNFS.Protocol.V40.Generated;
     using OpenNFS.Client.Raw;
+    using OpenNFS.Rpc.Xdr;
 
     /// <summary>
     /// Provides grouped file-oriented convenience APIs over the lower-level raw client surface.
@@ -138,6 +140,43 @@ namespace OpenNFS.Client.Apis
         public OpenNfsV40SetAclResult ReadSetAclV40Result(ReadOnlyMemory<byte> encodedReply)
         {
             return OpenNfsV40ReplyDecoder.ReadSetAclResult(encodedReply);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.0 COMPOUND <c>PUTFH</c> + <c>SETATTR</c> owner and owner-group flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV40SetIdentityResult> SetOwnerAndGroupV40Async(
+            byte[] fileHandle,
+            string? owner,
+            string? ownerGroup,
+            CancellationToken cancellationToken)
+        {
+            return _client.ExecuteCompoundAsync(
+                CreateSetOwnerAndGroupV40Request(fileHandle, owner, ownerGroup),
+                "NFSv4.0 SETATTR owner/owner_group",
+                OpenNfsTransportPipelineIdempotency.Idempotent,
+                ReadSetOwnerAndGroupV40Result,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.0 grouped owner and owner-group <c>SETATTR</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareSetOwnerAndGroupV40Async(
+            byte[] fileHandle,
+            string? owner,
+            string? ownerGroup,
+            CancellationToken cancellationToken)
+        {
+            return _client.PrepareCompoundAsync(CreateSetOwnerAndGroupV40Request(fileHandle, owner, ownerGroup), cancellationToken);
+        }
+
+        /// <summary>
+        /// Decodes a typed NFSv4.0 owner and owner-group <c>SETATTR</c> result from a full encoded RPC reply.
+        /// </summary>
+        public OpenNfsV40SetIdentityResult ReadSetOwnerAndGroupV40Result(ReadOnlyMemory<byte> encodedReply)
+        {
+            return OpenNfsV40ReplyDecoder.ReadSetIdentityResult(encodedReply);
         }
 
         /// <summary>
@@ -1619,6 +1658,33 @@ namespace OpenNFS.Client.Apis
                 });
         }
 
+        private static OpenNfsCompoundRequest CreateSetOwnerAndGroupV40Request(
+            byte[] fileHandle,
+            string? owner,
+            string? ownerGroup)
+        {
+            fattr4 identityAttributes = CreateV40IdentityAttributes(owner, ownerGroup);
+            return new OpenNfsCompoundRequest(
+                OpenNfsProtocolVersion.Nfs40,
+                "set-identity",
+                new OpenNfsCompoundOperation[]
+                {
+                    CreatePutFileHandleOperation(fileHandle, nameof(fileHandle)),
+                    new OpenNfsCompoundOperation(
+                        (uint)nfs_opnum4.OP_SETATTR,
+                        EncodeV40Payload(
+                            new SETATTR4args
+                            {
+                                stateid = new stateid4
+                                {
+                                    seqid = 0U,
+                                    other = new byte[12],
+                                },
+                                obj_attributes = identityAttributes,
+                            }.WriteTo)),
+                });
+        }
+
         private static bitmap4 CreateDefaultV40AttributeRequest()
         {
             return new bitmap4
@@ -1716,6 +1782,56 @@ namespace OpenNFS.Client.Apis
             return new fattr4
             {
                 attrmask = CreateV40AttributeRequest(new[] { OpenNfsV40AttributeKind.Acl }),
+                attr_vals = new attrlist4
+                {
+                    Value = writer.ToArray(),
+                },
+            };
+        }
+
+        private static fattr4 CreateV40IdentityAttributes(string? owner, string? ownerGroup)
+        {
+            if (string.IsNullOrWhiteSpace(owner) && string.IsNullOrWhiteSpace(ownerGroup))
+            {
+                throw new ArgumentException("At least one of owner or owner-group must be supplied for NFSv4 identity updates.", nameof(owner));
+            }
+
+            XdrWriter writer = new XdrWriter();
+            List<OpenNfsV40AttributeKind> attributeKinds = new List<OpenNfsV40AttributeKind>();
+
+            if (!string.IsNullOrWhiteSpace(owner))
+            {
+                attributeKinds.Add(OpenNfsV40AttributeKind.Owner);
+                new fattr4_owner
+                {
+                    Value = new utf8str_mixed
+                    {
+                        Value = new utf8string
+                        {
+                            Value = Encoding.UTF8.GetBytes(owner),
+                        },
+                    },
+                }.WriteTo(writer);
+            }
+
+            if (!string.IsNullOrWhiteSpace(ownerGroup))
+            {
+                attributeKinds.Add(OpenNfsV40AttributeKind.OwnerGroup);
+                new fattr4_owner_group
+                {
+                    Value = new utf8str_mixed
+                    {
+                        Value = new utf8string
+                        {
+                            Value = Encoding.UTF8.GetBytes(ownerGroup),
+                        },
+                    },
+                }.WriteTo(writer);
+            }
+
+            return new fattr4
+            {
+                attrmask = CreateV40AttributeRequest(attributeKinds),
                 attr_vals = new attrlist4
                 {
                     Value = writer.ToArray(),

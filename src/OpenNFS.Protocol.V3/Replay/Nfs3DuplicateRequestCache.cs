@@ -146,6 +146,59 @@ namespace OpenNFS.Protocol.V3.Replay
                 + bodyHash;
         }
 
+        private static string CreateStableRequesterIdentity(RpcMessageEnvelope request, opaque_auth credential)
+        {
+            string authRequesterIdentity = CreateRequesterIdentity(credential);
+            if (string.IsNullOrWhiteSpace(request.RequesterIdentity))
+            {
+                return authRequesterIdentity;
+            }
+
+            if (credential.flavor != auth_flavor.AUTH_SYS)
+            {
+                return request.RequesterIdentity!;
+            }
+
+            if (!TryNormalizeTransportHost(request.RequesterIdentity!, out string? transportHost))
+            {
+                return authRequesterIdentity;
+            }
+
+            return "transport-host:" + transportHost + "|" + authRequesterIdentity;
+        }
+
+        private static bool TryNormalizeTransportHost(string requesterIdentity, out string? transportHost)
+        {
+            transportHost = null;
+            if (string.IsNullOrWhiteSpace(requesterIdentity))
+            {
+                return false;
+            }
+
+            string trimmedIdentity = requesterIdentity.Trim();
+            if (trimmedIdentity.StartsWith("[", StringComparison.Ordinal))
+            {
+                int closingBracketIndex = trimmedIdentity.IndexOf(']');
+                if (closingBracketIndex <= 1)
+                {
+                    return false;
+                }
+
+                transportHost = trimmedIdentity.Substring(1, closingBracketIndex - 1);
+                return transportHost.Length > 0;
+            }
+
+            int lastColonIndex = trimmedIdentity.LastIndexOf(':');
+            if (lastColonIndex <= 0)
+            {
+                transportHost = trimmedIdentity;
+                return transportHost.Length > 0;
+            }
+
+            transportHost = trimmedIdentity.Substring(0, lastColonIndex);
+            return transportHost.Length > 0;
+        }
+
         private static bool TryCreateCorrelationKey(RpcMessageEnvelope request, out RpcRequestCorrelationKey key)
         {
             rpc_msg_body? body = request.Header.body;
@@ -157,9 +210,7 @@ namespace OpenNFS.Protocol.V3.Replay
 
             call_body callBody = body.cbody;
             opaque_auth credential = callBody.cred ?? RpcAuthenticationCodec.CreateNone();
-            string requesterIdentity = !string.IsNullOrWhiteSpace(request.RequesterIdentity)
-                ? request.RequesterIdentity!
-                : CreateRequesterIdentity(credential);
+            string requesterIdentity = CreateStableRequesterIdentity(request, credential);
 
             key = new RpcRequestCorrelationKey(
                 requesterIdentity,

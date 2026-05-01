@@ -47,6 +47,32 @@ namespace Test.Shared.Infrastructure
             return _LockManager.ProcessAsync(request);
         }
 
+        // INfsSparse implementations: this fixture exists only to verify capability discovery wires
+        // through to the protocol layer. Real sparse semantics live in the production sample provider.
+        ValueTask<NfsSeekResponse> INfsSparse.SeekAsync(NfsSeekRequest request)
+        {
+            return ValueTask.FromResult(new NfsSeekResponse(request.Offset, !request.SearchForData));
+        }
+
+        ValueTask<NfsAllocateResponse> INfsSparse.AllocateAsync(NfsAllocateRequest request)
+        {
+            return ValueTask.FromResult(NfsAllocateResponse.Success);
+        }
+
+        ValueTask<NfsDeallocateResponse> INfsSparse.DeallocateAsync(NfsDeallocateRequest request)
+        {
+            return ValueTask.FromResult(NfsDeallocateResponse.Success);
+        }
+
+        ValueTask<NfsReadSparseResponse> INfsSparse.ReadSparseAsync(NfsReadSparseRequest request)
+        {
+            byte[] payload = new byte[request.Count];
+            return ValueTask.FromResult(
+                new NfsReadSparseResponse(
+                    new[] { NfsSparseExtent.ForData(request.Offset, payload) },
+                    endOfFile: false));
+        }
+
         public Task<NfsAcquireDelegationResponse> AcquireDelegationAsync(NfsAcquireDelegationRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);

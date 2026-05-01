@@ -52,7 +52,7 @@ namespace OpenNFS.Client
 
                 if (readResult.Count == 0)
                 {
-                    throw new InvalidOperationException(
+                    throw new OpenNfsClientProtocolException(
                         "Mounted-session file read for path '"
                         + path
                         + "' returned zero bytes without reaching EOF.");
@@ -96,7 +96,7 @@ namespace OpenNFS.Client
 
                 if (writeResult.Count != (uint)chunkLength)
                 {
-                    throw new InvalidOperationException(
+                    throw new OpenNfsClientProtocolException(
                         "Mounted-session file write for path '"
                         + path
                         + "' acknowledged "

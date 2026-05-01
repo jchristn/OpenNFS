@@ -544,6 +544,25 @@ namespace OpenNFS.Client.Internal
                 ReadBitmapWords(setAttributeResult.attrsset, "SETATTR4res.attrsset"));
         }
 
+        internal static OpenNfsV40SetIdentityResult ReadSetIdentityResult(ReadOnlyMemory<byte> encodedReply)
+        {
+            COMPOUND4res result = ReadCompoundResult(encodedReply, "NFSv4.0 SETATTR owner/owner_group");
+            OpenNfsV40Status overallStatus = MapStatus(ReadRequiredStatus(result.status, "NFSv4.0 SETATTR owner/owner_group"));
+
+            if (overallStatus != OpenNfsV40Status.Ok)
+            {
+                return new OpenNfsV40SetIdentityResult(ReadTerminalStatus(result, overallStatus));
+            }
+
+            EnsureSuccessOperationCount(result, 2, "NFSv4.0 SETATTR owner/owner_group");
+            SETATTR4res setAttributeResult = ReadExpectedOperation(result, 1, nfs_opnum4.OP_SETATTR, "NFSv4.0 SETATTR owner/owner_group").opsetattr
+                ?? throw new InvalidDataException("The successful NFSv4.0 SETATTR reply omitted the SETATTR result arm.");
+
+            return new OpenNfsV40SetIdentityResult(
+                overallStatus,
+                ReadBitmapWords(setAttributeResult.attrsset, "SETATTR4res.attrsset"));
+        }
+
         internal static OpenNfsV40DirectoryMutationResult ReadRemoveResult(ReadOnlyMemory<byte> encodedReply)
         {
             COMPOUND4res result = ReadCompoundResult(encodedReply, "NFSv4.0 REMOVE");
@@ -1020,6 +1039,7 @@ namespace OpenNFS.Client.Internal
                 nfs_opnum4.OP_CLOSE => terminalOperation.opclose?.status,
                 nfs_opnum4.OP_COMMIT => terminalOperation.opcommit?.status,
                 nfs_opnum4.OP_CREATE => terminalOperation.opcreate?.status,
+                nfs_opnum4.OP_DELEGPURGE => terminalOperation.opdelegpurge?.status,
                 nfs_opnum4.OP_DELEGRETURN => terminalOperation.opdelegreturn?.status,
                 nfs_opnum4.OP_GETATTR => terminalOperation.opgetattr?.status,
                 nfs_opnum4.OP_GETFH => terminalOperation.opgetfh?.status,
@@ -1030,14 +1050,18 @@ namespace OpenNFS.Client.Internal
                 nfs_opnum4.OP_LOCKU => terminalOperation.oplocku?.status,
                 nfs_opnum4.OP_LOOKUP => terminalOperation.oplookup?.status,
                 nfs_opnum4.OP_LOOKUPP => terminalOperation.oplookupp?.status,
+                nfs_opnum4.OP_NVERIFY => terminalOperation.opnverify?.status,
                 nfs_opnum4.OP_OPEN => terminalOperation.opopen?.status,
+                nfs_opnum4.OP_OPENATTR => terminalOperation.opopenattr?.status,
                 nfs_opnum4.OP_OPEN_CONFIRM => terminalOperation.opopen_confirm?.status,
                 nfs_opnum4.OP_OPEN_DOWNGRADE => terminalOperation.opopen_downgrade?.status,
                 nfs_opnum4.OP_PUTFH => terminalOperation.opputfh?.status,
+                nfs_opnum4.OP_PUTPUBFH => terminalOperation.opputpubfh?.status,
                 nfs_opnum4.OP_PUTROOTFH => terminalOperation.opputrootfh?.status,
                 nfs_opnum4.OP_READ => terminalOperation.opread?.status,
                 nfs_opnum4.OP_READDIR => terminalOperation.opreaddir?.status,
                 nfs_opnum4.OP_READLINK => terminalOperation.opreadlink?.status,
+                nfs_opnum4.OP_RELEASE_LOCKOWNER => terminalOperation.oprelease_lockowner?.status,
                 nfs_opnum4.OP_REMOVE => terminalOperation.opremove?.status,
                 nfs_opnum4.OP_RENAME => terminalOperation.oprename?.status,
                 nfs_opnum4.OP_RENEW => terminalOperation.oprenew?.status,
@@ -1047,6 +1071,7 @@ namespace OpenNFS.Client.Internal
                 nfs_opnum4.OP_SETATTR => terminalOperation.opsetattr?.status,
                 nfs_opnum4.OP_SETCLIENTID => terminalOperation.opsetclientid?.status,
                 nfs_opnum4.OP_SETCLIENTID_CONFIRM => terminalOperation.opsetclientid_confirm?.status,
+                nfs_opnum4.OP_VERIFY => terminalOperation.opverify?.status,
                 nfs_opnum4.OP_WRITE => terminalOperation.opwrite?.status,
                 _ => null,
             };

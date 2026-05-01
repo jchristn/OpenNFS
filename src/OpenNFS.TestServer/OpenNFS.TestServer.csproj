@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Interactive menu-driven console server for exercising the public OpenNFS server package.</Description>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <ProjectReference Include="..\OpenNFS.Server\OpenNFS.Server.csproj" />
+  </ItemGroup>
+</Project>

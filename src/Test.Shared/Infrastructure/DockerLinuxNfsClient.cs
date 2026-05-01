@@ -13,6 +13,20 @@ namespace Test.Shared.Infrastructure
 
             await DockerInteropImages.EnsureBuiltAsync(cancellationToken).ConfigureAwait(false);
 
+            DockerCommandResult result = await RunCommandCoreAsync(shellCommand, cancellationToken).ConfigureAwait(false);
+            if (NeedsImageRebuildRetry(result))
+            {
+                await DockerInteropImages.EnsureBuiltAsync(cancellationToken, forceRebuild: true).ConfigureAwait(false);
+                result = await RunCommandCoreAsync(shellCommand, cancellationToken).ConfigureAwait(false);
+            }
+
+            return result;
+        }
+
+        private static async Task<DockerCommandResult> RunCommandCoreAsync(string shellCommand, CancellationToken cancellationToken)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(shellCommand);
+
             string containerName = "opennfs-linux-client-" + Guid.NewGuid().ToString("N");
 
             try
@@ -36,6 +50,13 @@ namespace Test.Shared.Infrastructure
             {
                 await RemoveContainerAsync(containerName).ConfigureAwait(false);
             }
+        }
+
+        private static bool NeedsImageRebuildRetry(DockerCommandResult result)
+        {
+            return result.ExitCode != 0
+                && result.StandardError.Contains("pull access denied", StringComparison.OrdinalIgnoreCase)
+                && result.StandardError.Contains(DockerInteropImages.LinuxNfsClientImage, StringComparison.Ordinal);
         }
 
         private static async Task RemoveContainerAsync(string containerName)

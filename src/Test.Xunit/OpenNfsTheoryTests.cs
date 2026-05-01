@@ -8,17 +8,18 @@ namespace Test.Xunit
     using global::Xunit;
 
     /// <summary>
-    /// Exposes each shared Touchstone descriptor as an individual xUnit theory row.
+    /// Exposes each fast shared Touchstone adapter-smoke descriptor as an individual xUnit theory row.
+    /// The full heavy matrix runs through Test.Automated instead of this adapter project.
     /// </summary>
     public sealed class OpenNfsTheoryTests
     {
         /// <summary>
-        /// Gets one theory row for each non-skipped shared Touchstone descriptor.
+        /// Gets one theory row for each non-skipped adapter-smoke descriptor.
         /// </summary>
-        /// <returns>The theory data for the shared suite catalog.</returns>
+        /// <returns>The theory data for the fast adapter-smoke suite catalog.</returns>
         public static TouchstoneTheoryData TestCases()
         {
-            return new TouchstoneTheoryData(OpenNfsSuites.All);
+            return new TouchstoneTheoryData(OpenNfsSuites.AdapterSmoke);
         }
 
         /// <summary>

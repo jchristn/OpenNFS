@@ -2,11 +2,15 @@ namespace OpenNFS.Server
 {
     using System;
     using System.Collections.Generic;
+    using System.Threading;
+    using System.Threading.Tasks;
     using OpenNFS.Server.Abstractions;
     using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.FileHandles;
     using OpenNFS.Server.FileSystems;
     using OpenNFS.Server.Internal;
+    using OpenNFS.Server.Requests;
+    using OpenNFS.Server.Responses;
 
     /// <summary>
     /// Builder for the initial OpenNFS server configuration surface.
@@ -282,6 +286,30 @@ namespace OpenNFS.Server
         }
 
         /// <summary>
+        /// Resolves and validates the exports exposed by the current builder state.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The validated export definitions.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the mandatory file system contract has not been configured.</exception>
+        public Task<IReadOnlyList<OpenNfsExportDefinition>> GetExportsAsync(CancellationToken cancellationToken = default)
+        {
+            return Build().GetExportsAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Resolves and validates the exports exposed by the current builder state using an explicit request context.
+        /// </summary>
+        /// <param name="request">Request context for the export-resolution operation.</param>
+        /// <returns>The response context containing the validated export definitions.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="request"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the mandatory file system contract has not been configured.</exception>
+        public Task<NfsGetExportsResponse> GetExportsAsync(NfsGetExportsRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            return Build().GetExportsAsync(request);
+        }
+
+        /// <summary>
         /// Builds an immutable settings object from the current builder state.
         /// </summary>
         /// <returns>The configured server settings.</returns>
@@ -319,6 +347,35 @@ namespace OpenNFS.Server
         public OpenNfsServer Build()
         {
             return new OpenNfsServer(BuildSettings());
+        }
+
+        /// <summary>
+        /// Builds the primary runnable server-application surface over the current builder state.
+        /// </summary>
+        /// <returns>The configured server application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the mandatory file system contract has not been configured.</exception>
+        public OpenNfsServerApplication BuildApplication()
+        {
+            OpenNfsServerSettings settings = BuildSettings();
+            return BuildApplication(
+                new OpenNfsServerApplicationOptions
+                {
+                    ListenerAddress = settings.ListenerAddress,
+                    NfsPort = settings.ListenerPort,
+                });
+        }
+
+        /// <summary>
+        /// Builds the primary runnable server-application surface over the current builder state.
+        /// </summary>
+        /// <param name="applicationOptions">Application listener options.</param>
+        /// <returns>The configured server application.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="applicationOptions"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when the mandatory file system contract has not been configured.</exception>
+        public OpenNfsServerApplication BuildApplication(OpenNfsServerApplicationOptions applicationOptions)
+        {
+            ArgumentNullException.ThrowIfNull(applicationOptions);
+            return new OpenNfsServerApplication(Build(), applicationOptions);
         }
 
         private INfsExportProvider ResolveExportProvider()

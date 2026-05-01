@@ -9,7 +9,7 @@ namespace Test.Shared.Infrastructure
 
     internal static class ExternalPackageConsumerSupport
     {
-        public static async Task<DotnetCommandResult> RunSinglePackageConsoleAppAsync(
+        public static async Task<ExternalPackageConsumerProject> CreateSinglePackageConsoleAppAsync(
             string packageProjectRelativePath,
             string packageId,
             string programSource,
@@ -23,6 +23,7 @@ namespace Test.Shared.Infrastructure
             string tempRoot = Path.Combine(Path.GetTempPath(), "OpenNFS.ExternalConsumer", Guid.NewGuid().ToString("N"));
             string feedDirectory = Path.Combine(tempRoot, "feed");
             string projectDirectory = Path.Combine(tempRoot, "consumer");
+            string uniquePackageVersion = BuildUniquePackageVersion(repositoryRoot);
 
             Directory.CreateDirectory(feedDirectory);
             Directory.CreateDirectory(projectDirectory);
@@ -34,17 +35,21 @@ namespace Test.Shared.Infrastructure
                     new[]
                     {
                         "pack",
+                        "--disable-build-servers",
+                        "--no-build",
                         packageProjectPath,
                         "-c",
                         "Release",
                         "-o",
                         feedDirectory,
+                        "/p:BuildProjectReferences=false",
+                        "/p:PackageVersion=" + uniquePackageVersion,
                     },
                     repositoryRoot,
                     cancellationToken,
                     timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
 
-                string packageVersion = ResolvePackedPackageVersion(feedDirectory, packageId);
+                string packageVersion = ResolvePackedPackageVersion(feedDirectory, packageId, uniquePackageVersion);
                 string projectPath = Path.Combine(projectDirectory, "Consumer.csproj");
                 string programPath = Path.Combine(projectDirectory, "Program.cs");
                 string nuGetConfigPath = Path.Combine(projectDirectory, "NuGet.Config");
@@ -57,6 +62,7 @@ namespace Test.Shared.Infrastructure
                     new[]
                     {
                         "restore",
+                        "--disable-build-servers",
                         projectPath,
                         "--configfile",
                         nuGetConfigPath,
@@ -65,24 +71,41 @@ namespace Test.Shared.Infrastructure
                     cancellationToken,
                     timeout: TimeSpan.FromMinutes(3)).ConfigureAwait(false);
 
-                return await DotnetCli.RunCheckedAsync(
+                return new ExternalPackageConsumerProject(tempRoot, projectDirectory, projectPath, nuGetConfigPath);
+            }
+            catch
+            {
+                TryDeleteDirectory(tempRoot);
+                throw;
+            }
+        }
+
+        public static async Task<DotnetCommandResult> RunSinglePackageConsoleAppAsync(
+            string packageProjectRelativePath,
+            string packageId,
+            string programSource,
+            CancellationToken cancellationToken)
+        {
+            await using ExternalPackageConsumerProject project = await CreateSinglePackageConsoleAppAsync(
+                packageProjectRelativePath,
+                packageId,
+                programSource,
+                cancellationToken).ConfigureAwait(false);
+
+            return await DotnetCli.RunCheckedAsync(
                     new[]
                     {
                         "run",
+                        "--disable-build-servers",
                         "--project",
-                        projectPath,
+                        project.ProjectPath,
                         "-c",
                         "Release",
                         "--no-restore",
                     },
-                    projectDirectory,
+                    project.ProjectDirectory,
                     cancellationToken,
                     timeout: TimeSpan.FromMinutes(3)).ConfigureAwait(false);
-            }
-            finally
-            {
-                TryDeleteDirectory(tempRoot);
-            }
         }
 
         private static string BuildProjectFile(string packageId, string packageVersion)
@@ -100,9 +123,30 @@ namespace Test.Shared.Infrastructure
                 + "</Project>" + Environment.NewLine;
         }
 
-        private static string ResolvePackedPackageVersion(string feedDirectory, string packageId)
+        private static string BuildUniquePackageVersion(string repositoryRoot)
         {
-            string packagePrefix = packageId + ".";
+            string directoryBuildPropsPath = Path.Combine(repositoryRoot, "src", "Directory.Build.props");
+            XDocument document = XDocument.Load(directoryBuildPropsPath);
+            string? baseVersion = document.Root?
+                .Elements("PropertyGroup")
+                .Elements("Version")
+                .Select(static element => element.Value.Trim())
+                .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+
+            if (string.IsNullOrWhiteSpace(baseVersion))
+            {
+                throw new InvalidOperationException(
+                    "Could not determine the repository package version from '" + directoryBuildPropsPath + "'.");
+            }
+
+            string uniqueSuffix = Guid.NewGuid().ToString("N");
+            return baseVersion.Contains('-', StringComparison.Ordinal)
+                ? baseVersion + ".external." + uniqueSuffix
+                : baseVersion + "-external." + uniqueSuffix;
+        }
+
+        private static string ResolvePackedPackageVersion(string feedDirectory, string packageId, string expectedPackageVersion)
+        {
             string[] packagePaths = Directory.GetFiles(feedDirectory, packageId + ".*.nupkg", SearchOption.TopDirectoryOnly)
                 .Where(static path => !path.EndsWith(".snupkg", StringComparison.OrdinalIgnoreCase))
                 .ToArray();
@@ -115,16 +159,14 @@ namespace Test.Shared.Infrastructure
             }
 
             string fileName = Path.GetFileName(packagePaths[0]);
-            if (!fileName.StartsWith(packagePrefix, StringComparison.Ordinal)
-                || !fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase))
+            string expectedFileName = packageId + "." + expectedPackageVersion + ".nupkg";
+            if (!string.Equals(fileName, expectedFileName, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    "Could not parse the packed package version from '" + fileName + "'.");
+                    "Expected the packed package file name to be '" + expectedFileName + "', but found '" + fileName + "'.");
             }
 
-            return fileName.Substring(
-                packagePrefix.Length,
-                fileName.Length - packagePrefix.Length - ".nupkg".Length);
+            return expectedPackageVersion;
         }
 
         private static void TryDeleteDirectory(string directoryPath)

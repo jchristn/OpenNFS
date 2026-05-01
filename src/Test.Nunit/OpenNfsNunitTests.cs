@@ -9,18 +9,19 @@ namespace Test.Nunit
     using Touchstone.NunitAdapter;
 
     /// <summary>
-    /// Exposes each shared Touchstone descriptor as an individual NUnit test case.
+    /// Exposes each fast shared Touchstone adapter-smoke descriptor as an individual NUnit test case.
+    /// The full heavy matrix runs through Test.Automated instead of this adapter project.
     /// </summary>
     [TestFixture]
     public sealed class OpenNfsNunitTests
     {
         /// <summary>
-        /// Gets one NUnit test case for each non-skipped shared Touchstone descriptor.
+        /// Gets one NUnit test case for each non-skipped adapter-smoke descriptor.
         /// </summary>
-        /// <returns>The shared Touchstone test case source.</returns>
+        /// <returns>The fast adapter-smoke test case source.</returns>
         public static IEnumerable TestCases()
         {
-            return new TouchstoneTestCaseSource(OpenNfsSuites.All);
+            return new TouchstoneTestCaseSource(OpenNfsSuites.AdapterSmoke);
         }
 
         /// <summary>
@@ -37,4 +38,3 @@ namespace Test.Nunit
         }
     }
 }
-

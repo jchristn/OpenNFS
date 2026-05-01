@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Interactive menu-driven console client for exercising the public OpenNFS client package.</Description>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Client\OpenNFS.Client.csproj" />
+  </ItemGroup>
+</Project>

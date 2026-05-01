@@ -7,10 +7,15 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Title>OpenNFS.Client</Title>
     <PackageTags>nfs;client;onc-rpc</PackageTags>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeProjectReferenceBuildOutputInPackage</TargetsForTfmSpecificBuildOutput>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
     <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
     <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
   </ItemGroup>

@@ -48,10 +48,39 @@ namespace OpenNFS.Protocol.V40.Compound
             _stateManager.SimulateRecovery();
         }
 
+        private async Task ReleaseExpiredLocksAsync(CancellationToken cancellationToken)
+        {
+            IReadOnlyList<Nfs40StateManager.Nfs40ExpiredLockCleanup> expiredLockCleanups =
+                _stateManager.DrainExpiredLockCleanups();
+            if (expiredLockCleanups.Count == 0 || _server.Capabilities.Locking is null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < expiredLockCleanups.Count; index++)
+            {
+                Nfs40StateManager.Nfs40ExpiredLockCleanup cleanup = expiredLockCleanups[index];
+                NfsLockRequest unlockRequest = CreateHostLockRequest(
+                    NfsLockOperation.Unlock,
+                    cleanup.Target,
+                    cleanup.ClientId,
+                    cleanup.OwnerBytes,
+                    cleanup.Offset,
+                    cleanup.Length,
+                    cleanup.Exclusive,
+                    block: false,
+                    reclaim: false,
+                    cancellationToken);
+                _ = await _server.Capabilities.Locking.ProcessLockAsync(unlockRequest).ConfigureAwait(false);
+            }
+        }
+
         internal async Task<COMPOUND4res> ExecuteAsync(COMPOUND4args arguments, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(arguments);
             cancellationToken.ThrowIfCancellationRequested();
+
+            await ReleaseExpiredLocksAsync(cancellationToken).ConfigureAwait(false);
 
             if (arguments.minorversion != 0U)
             {
@@ -72,6 +101,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 Nfs40CompoundOperationResult operationResult =
                     await ExecuteOperationAsync(operations[index], state, cancellationToken).ConfigureAwait(false);
+                await ReleaseExpiredLocksAsync(cancellationToken).ConfigureAwait(false);
                 results.Add(operationResult.ResponseOperation);
 
                 if (operationResult.Status != nfsstat4.NFS4_OK)
@@ -169,6 +199,20 @@ namespace OpenNFS.Protocol.V40.Compound
                 });
         }
 
+        private static Nfs40CompoundOperationResult CreateDelegationPurgeResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_DELEGPURGE,
+                    opdelegpurge = new DELEGPURGE4res
+                    {
+                        status = status,
+                    },
+                });
+        }
+
         private static Nfs40CompoundOperationResult CreateCloseResult(nfsstat4 status, stateid4? stateId = null)
         {
             return new Nfs40CompoundOperationResult(
@@ -180,6 +224,34 @@ namespace OpenNFS.Protocol.V40.Compound
                     {
                         status = status,
                         open_stateid = status == nfsstat4.NFS4_OK ? stateId : null,
+                    },
+                });
+        }
+
+        private static Nfs40CompoundOperationResult CreateNotVerifyResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_NVERIFY,
+                    opnverify = new NVERIFY4res
+                    {
+                        status = status,
+                    },
+                });
+        }
+
+        private static Nfs40CompoundOperationResult CreateOpenAttributeResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_OPENATTR,
+                    opopenattr = new OPENATTR4res
+                    {
+                        status = status,
                     },
                 });
         }
@@ -431,6 +503,20 @@ namespace OpenNFS.Protocol.V40.Compound
                 });
         }
 
+        private static Nfs40CompoundOperationResult CreatePutPublicFileHandleResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_PUTPUBFH,
+                    opputpubfh = new PUTPUBFH4res
+                    {
+                        status = status,
+                    },
+                });
+        }
+
         private static Nfs40CompoundOperationResult CreatePutRootFileHandleResult(nfsstat4 status)
         {
             return new Nfs40CompoundOperationResult(
@@ -439,6 +525,20 @@ namespace OpenNFS.Protocol.V40.Compound
                 {
                     resop = nfs_opnum4.OP_PUTROOTFH,
                     opputrootfh = new PUTROOTFH4res
+                    {
+                        status = status,
+                    },
+                });
+        }
+
+        private static Nfs40CompoundOperationResult CreateReleaseLockOwnerResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_RELEASE_LOCKOWNER,
+                    oprelease_lockowner = new RELEASE_LOCKOWNER4res
                     {
                         status = status,
                     },
@@ -614,6 +714,20 @@ namespace OpenNFS.Protocol.V40.Compound
                 });
         }
 
+        private static Nfs40CompoundOperationResult CreateVerifyResult(nfsstat4 status)
+        {
+            return new Nfs40CompoundOperationResult(
+                status,
+                new nfs_resop4
+                {
+                    resop = nfs_opnum4.OP_VERIFY,
+                    opverify = new VERIFY4res
+                    {
+                        status = status,
+                    },
+                });
+        }
+
         private static Nfs40CompoundOperationResult CreateWriteResult(
             nfsstat4 status,
             WRITE4resok? successPayload = null)
@@ -656,6 +770,9 @@ namespace OpenNFS.Protocol.V40.Compound
                 case nfs_opnum4.OP_COMMIT:
                     return await HandleCommitAsync(operation, state, cancellationToken).ConfigureAwait(false);
 
+                case nfs_opnum4.OP_DELEGPURGE:
+                    return HandleDelegationPurge(operation);
+
                 case nfs_opnum4.OP_DELEGRETURN:
                     return await HandleDelegationReturnAsync(operation, state, cancellationToken).ConfigureAwait(false);
 
@@ -683,8 +800,18 @@ namespace OpenNFS.Protocol.V40.Compound
                 case nfs_opnum4.OP_LOOKUPP:
                     return await HandleLookupParentAsync(state, cancellationToken).ConfigureAwait(false);
 
+                case nfs_opnum4.OP_NVERIFY:
+                    return await HandleVerifyAsync(
+                        operation.opnverify?.obj_attributes,
+                        state,
+                        expectMatch: false,
+                        cancellationToken).ConfigureAwait(false);
+
                 case nfs_opnum4.OP_OPEN:
                     return await HandleOpenAsync(operation, state, cancellationToken).ConfigureAwait(false);
+
+                case nfs_opnum4.OP_OPENATTR:
+                    return await HandleOpenAttributeAsync(operation, state, cancellationToken).ConfigureAwait(false);
 
                 case nfs_opnum4.OP_OPEN_CONFIRM:
                     return HandleOpenConfirm(operation);
@@ -694,6 +821,9 @@ namespace OpenNFS.Protocol.V40.Compound
 
                 case nfs_opnum4.OP_PUTFH:
                     return await HandlePutFileHandleAsync(operation, state, cancellationToken).ConfigureAwait(false);
+
+                case nfs_opnum4.OP_PUTPUBFH:
+                    return await HandlePutPublicFileHandleAsync(state, cancellationToken).ConfigureAwait(false);
 
                 case nfs_opnum4.OP_PUTROOTFH:
                     return await HandlePutRootFileHandleAsync(state, cancellationToken).ConfigureAwait(false);
@@ -734,8 +864,18 @@ namespace OpenNFS.Protocol.V40.Compound
                 case nfs_opnum4.OP_SETCLIENTID_CONFIRM:
                     return HandleSetClientIdConfirm(operation);
 
+                case nfs_opnum4.OP_VERIFY:
+                    return await HandleVerifyAsync(
+                        operation.opverify?.obj_attributes,
+                        state,
+                        expectMatch: true,
+                        cancellationToken).ConfigureAwait(false);
+
                 case nfs_opnum4.OP_WRITE:
                     return await HandleWriteAsync(operation, state, cancellationToken).ConfigureAwait(false);
+
+                case nfs_opnum4.OP_RELEASE_LOCKOWNER:
+                    return HandleReleaseLockOwner(operation);
 
                 default:
                     return CreateIllegalOperationResult();
@@ -1118,36 +1258,70 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateSetAttrResult(nfsstat4.NFS4ERR_NOTSUPP);
             }
 
-            if (_server.Capabilities.Acls is null)
-            {
-                return CreateSetAttrResult(nfsstat4.NFS4ERR_ATTRNOTSUPP);
-            }
-
-            if (!Nfs40AclCodec.TryReadSetAclAttributes(
+            if (!Nfs40AttributeEncoder.TryReadSettableAttributes(
                 arguments.obj_attributes,
-                out NfsAclEntry[] aclEntries,
+                includeIdentityAttributes: _server.Capabilities.IdMapper is not null,
+                includeAclAttributes: _server.Capabilities.Acls is not null,
+                out Nfs40SetAttributeUpdate? update,
                 out nfsstat4 decodeStatus))
             {
                 return CreateSetAttrResult(decodeStatus);
             }
 
+            List<int> updatedAttributeIds = new List<int>();
             try
             {
-                await _server.Capabilities.Acls.SetAclAsync(
-                    new NfsSetAclRequest(
-                        refreshedHandle.Target.SourcePath,
-                        refreshedHandle.PathInfo.Kind,
-                        aclEntries,
-                        cancellationToken)).ConfigureAwait(false);
+                if (update!.HasAclUpdate)
+                {
+                    await _server.Capabilities.Acls!.SetAclAsync(
+                        new NfsSetAclRequest(
+                            refreshedHandle.Target.SourcePath,
+                            refreshedHandle.PathInfo.Kind,
+                            update.AclEntries,
+                            cancellationToken)).ConfigureAwait(false);
+                    updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_ACL);
+                }
+
+                if (update.HasIdentityUpdate)
+                {
+                    NfsSetIdentityResponse identityResponse =
+                        await _server.Capabilities.IdMapper!.SetIdentityAsync(
+                            new NfsSetIdentityRequest(
+                                refreshedHandle.Target.SourcePath,
+                                refreshedHandle.PathInfo.Kind,
+                                update.Owner,
+                                update.OwnerGroup,
+                                cancellationToken)).ConfigureAwait(false);
+
+                    if (update.Owner is not null)
+                    {
+                        updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_OWNER);
+                    }
+
+                    if (update.OwnerGroup is not null)
+                    {
+                        updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_OWNER_GROUP);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(identityResponse.Owner) || string.IsNullOrWhiteSpace(identityResponse.OwnerGroup))
+                    {
+                        return CreateSetAttrResult(nfsstat4.NFS4ERR_SERVERFAULT);
+                    }
+                }
             }
             catch (Exception exception)
             {
-                return CreateSetAttrResult(Nfs40MutationSupport.MapAclException(exception));
+                return CreateSetAttrResult(
+                    update!.HasIdentityUpdate && !update.HasAclUpdate
+                        ? Nfs40MutationSupport.MapIdentityException(exception)
+                        : update.HasAclUpdate && !update.HasIdentityUpdate
+                            ? Nfs40MutationSupport.MapAclException(exception)
+                            : Nfs40MutationSupport.MapCreateException(exception));
             }
 
             return CreateSetAttrResult(
                 nfsstat4.NFS4_OK,
-                Nfs40AttributeEncoder.CreateBitmap((int)Nfs40Constants.FATTR4_ACL));
+                Nfs40AttributeEncoder.CreateBitmap(updatedAttributeIds.ToArray()));
         }
 
         private async Task<Nfs40CompoundOperationResult> HandleLinkAsync(
@@ -1362,6 +1536,11 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 return CreateLockResult(preparation.Status);
             }
+
+            preparation.PendingOperation.Target = refreshedHandle.Target;
+            preparation.PendingOperation.Offset = arguments.offset.Value;
+            preparation.PendingOperation.Length = arguments.length.Value;
+            preparation.PendingOperation.Exclusive = exclusive;
 
             NfsLockRequest request = CreateHostLockRequest(
                 NfsLockOperation.Lock,
@@ -2322,15 +2501,36 @@ namespace OpenNFS.Protocol.V40.Compound
             }
         }
 
+        private async Task<Nfs40CompoundOperationResult> HandlePutPublicFileHandleAsync(
+            Nfs40CompoundState state,
+            CancellationToken cancellationToken)
+        {
+            return await HandleNamespaceRootFileHandleAsync(
+                state,
+                CreatePutPublicFileHandleResult,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         private async Task<Nfs40CompoundOperationResult> HandlePutRootFileHandleAsync(
             Nfs40CompoundState state,
+            CancellationToken cancellationToken)
+        {
+            return await HandleNamespaceRootFileHandleAsync(
+                state,
+                CreatePutRootFileHandleResult,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<Nfs40CompoundOperationResult> HandleNamespaceRootFileHandleAsync(
+            Nfs40CompoundState state,
+            Func<nfsstat4, Nfs40CompoundOperationResult> createResult,
             CancellationToken cancellationToken)
         {
             IReadOnlyList<OpenNfsExportDefinition> exports =
                 await _server.GetExportsAsync(cancellationToken).ConfigureAwait(false);
             if (exports.Count == 0)
             {
-                return CreatePutRootFileHandleResult(nfsstat4.NFS4ERR_NOFILEHANDLE);
+                return createResult(nfsstat4.NFS4ERR_NOFILEHANDLE);
             }
 
             OpenNfsExportDefinition rootExport = SelectRootExport(exports);
@@ -2339,7 +2539,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     new NfsFileHandleTarget(rootExport.ExportPath, rootExport.SourcePath),
                     cancellationToken).ConfigureAwait(false);
             state.SetCurrentHandle(resolvedHandle);
-            return CreatePutRootFileHandleResult(nfsstat4.NFS4_OK);
+            return createResult(nfsstat4.NFS4_OK);
         }
 
         private async Task<Nfs40CompoundOperationResult> HandleWriteAsync(
@@ -3280,6 +3480,114 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             return attributes?.attr_vals?.Value is { Length: > 0 };
+        }
+
+        private static nfsstat4 CompareVerifiedAttributes(byte[] expectedBytes, byte[] actualBytes, bool expectMatch)
+        {
+            bool isSame = expectedBytes.AsSpan().SequenceEqual(actualBytes);
+            if (expectMatch)
+            {
+                return isSame ? nfsstat4.NFS4_OK : nfsstat4.NFS4ERR_NOT_SAME;
+            }
+
+            return isSame ? nfsstat4.NFS4ERR_SAME : nfsstat4.NFS4_OK;
+        }
+
+        private async Task<Nfs40CompoundOperationResult> HandleVerifyAsync(
+            fattr4? requestedAttributes,
+            Nfs40CompoundState state,
+            bool expectMatch,
+            CancellationToken cancellationToken)
+        {
+            Func<nfsstat4, Nfs40CompoundOperationResult> createResult = expectMatch
+                ? CreateVerifyResult
+                : CreateNotVerifyResult;
+
+            if (!Nfs40AttributeEncoder.TryValidateAttributePayload(
+                requestedAttributes,
+                includeIdentityAttributes: _server.Capabilities.IdMapper is not null,
+                includeAclAttributes: _server.Capabilities.Acls is not null,
+                out nfsstat4 validationStatus))
+            {
+                return createResult(validationStatus);
+            }
+
+            if (!state.TryGetCurrentHandle(out Nfs40CompoundResolvedHandle? currentHandle))
+            {
+                return createResult(nfsstat4.NFS4ERR_NOFILEHANDLE);
+            }
+
+            (Nfs40CompoundResolvedHandle? refreshedHandle, nfsstat4 refreshStatus) =
+                await TryRefreshResolvedHandleAsync(currentHandle!, cancellationToken).ConfigureAwait(false);
+            if (refreshedHandle is null)
+            {
+                return createResult(refreshStatus);
+            }
+
+            (fattr4? actualAttributes, nfsstat4 actualStatus) =
+                await Nfs40AttributeEncoder.TryCreateAttributesAsync(
+                    _server,
+                    refreshedHandle,
+                    requestedAttributes!.attrmask,
+                    cancellationToken).ConfigureAwait(false);
+            if (actualAttributes is null)
+            {
+                return createResult(actualStatus);
+            }
+
+            byte[] expectedBytes = requestedAttributes.attr_vals?.Value ?? Array.Empty<byte>();
+            byte[] actualBytes = actualAttributes.attr_vals?.Value ?? Array.Empty<byte>();
+            return createResult(CompareVerifiedAttributes(expectedBytes, actualBytes, expectMatch));
+        }
+
+        private Nfs40CompoundOperationResult HandleDelegationPurge(nfs_argop4 operation)
+        {
+            if (operation.opdelegpurge is null)
+            {
+                return CreateDelegationPurgeResult(nfsstat4.NFS4ERR_BADXDR);
+            }
+
+            return CreateDelegationPurgeResult(nfsstat4.NFS4ERR_NOTSUPP);
+        }
+
+        private async Task<Nfs40CompoundOperationResult> HandleOpenAttributeAsync(
+            nfs_argop4 operation,
+            Nfs40CompoundState state,
+            CancellationToken cancellationToken)
+        {
+            if (operation.opopenattr is null)
+            {
+                return CreateOpenAttributeResult(nfsstat4.NFS4ERR_BADXDR);
+            }
+
+            if (!state.TryGetCurrentHandle(out Nfs40CompoundResolvedHandle? currentHandle))
+            {
+                return CreateOpenAttributeResult(nfsstat4.NFS4ERR_NOFILEHANDLE);
+            }
+
+            (Nfs40CompoundResolvedHandle? refreshedHandle, nfsstat4 refreshStatus) =
+                await TryRefreshResolvedHandleAsync(currentHandle!, cancellationToken).ConfigureAwait(false);
+            if (refreshedHandle is null)
+            {
+                return CreateOpenAttributeResult(refreshStatus);
+            }
+
+            if (refreshedHandle.PathInfo.Kind == NfsPathKind.Other)
+            {
+                return CreateOpenAttributeResult(nfsstat4.NFS4ERR_BADTYPE);
+            }
+
+            return CreateOpenAttributeResult(nfsstat4.NFS4ERR_NOTSUPP);
+        }
+
+        private Nfs40CompoundOperationResult HandleReleaseLockOwner(nfs_argop4 operation)
+        {
+            if (operation.oprelease_lockowner?.lock_owner is null)
+            {
+                return CreateReleaseLockOwnerResult(nfsstat4.NFS4ERR_BADXDR);
+            }
+
+            return CreateReleaseLockOwnerResult(nfsstat4.NFS4ERR_NOTSUPP);
         }
 
         private static READDIR4res CreateReadDirectorySuccessResult(

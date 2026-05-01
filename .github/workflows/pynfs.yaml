@@ -1,0 +1,49 @@
+name: pynfs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  pynfs:
+    runs-on:
+      - self-hosted
+      - linux
+      - privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore src/OpenNFS.sln
+
+      - name: Build
+        run: dotnet build src/OpenNFS.sln -c Release --no-restore
+
+      - name: Enforce no explicit skipped tests
+        shell: pwsh
+        run: ./scripts/release/Assert-NoSkippedTests.ps1
+
+      - name: Execute or plan pynfs integration
+        shell: pwsh
+        run: |
+          if ($env:PYNFS_ROOT -and $env:PYNFS_ENTRYPOINT) {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
+          }
+          else {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs
+          }
+
+      - name: Upload pynfs planning artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pynfs-results
+          path: artifacts/pynfs
+          if-no-files-found: ignore

@@ -124,6 +124,8 @@ namespace Test.Shared.Infrastructure
             process.StartInfo.ArgumentList.Add("--no-build");
             process.StartInfo.ArgumentList.Add("-c");
             process.StartInfo.ArgumentList.Add("Release");
+            process.StartInfo.ArgumentList.Add("--framework");
+            process.StartInfo.ArgumentList.Add(InteropTargetFramework.Current);
             process.StartInfo.ArgumentList.Add("--project");
             process.StartInfo.ArgumentList.Add(sampleProjectPath);
             process.StartInfo.ArgumentList.Add("--");

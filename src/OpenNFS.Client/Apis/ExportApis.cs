@@ -28,7 +28,7 @@ namespace OpenNFS.Client.Apis
         /// <returns>The validated raw procedure plan.</returns>
         public Task<OpenNfsV3ProcedurePlan> PrepareListExportsV3Async(CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountExportProcedure), cancellationToken);
+            return _client.PrepareMountV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountExportProcedure), cancellationToken);
         }
 
         /// <summary>
@@ -38,7 +38,7 @@ namespace OpenNFS.Client.Apis
         /// <returns>The validated raw procedure plan.</returns>
         public Task<OpenNfsV3ProcedurePlan> PrepareListMountsV3Async(CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountDumpProcedure), cancellationToken);
+            return _client.PrepareMountV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountDumpProcedure), cancellationToken);
         }
 
         /// <summary>
@@ -49,7 +49,7 @@ namespace OpenNFS.Client.Apis
         /// <returns>The validated raw procedure plan.</returns>
         public Task<OpenNfsV3ProcedurePlan> PrepareMountV3Async(string exportPath, CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateMountPathRequest(OpenNfsV3RpcConstants.MountProcedure, exportPath), cancellationToken);
+            return _client.PrepareMountV3ProcedureAsync(CreateMountPathRequest(OpenNfsV3RpcConstants.MountProcedure, exportPath), cancellationToken);
         }
 
         /// <summary>
@@ -60,7 +60,7 @@ namespace OpenNFS.Client.Apis
         /// <returns>The validated raw procedure plan.</returns>
         public Task<OpenNfsV3ProcedurePlan> PrepareUnmountV3Async(string exportPath, CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateMountPathRequest(OpenNfsV3RpcConstants.MountUmountProcedure, exportPath), cancellationToken);
+            return _client.PrepareMountV3ProcedureAsync(CreateMountPathRequest(OpenNfsV3RpcConstants.MountUmountProcedure, exportPath), cancellationToken);
         }
 
         /// <summary>
@@ -70,7 +70,7 @@ namespace OpenNFS.Client.Apis
         /// <returns>The validated raw procedure plan.</returns>
         public Task<OpenNfsV3ProcedurePlan> PrepareUnmountAllV3Async(CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountUmountAllProcedure), cancellationToken);
+            return _client.PrepareMountV3ProcedureAsync(CreateMountVoidRequest(OpenNfsV3RpcConstants.MountUmountAllProcedure), cancellationToken);
         }
 
         /// <summary>
@@ -80,12 +80,22 @@ namespace OpenNFS.Client.Apis
         /// <returns>The decoded export entries.</returns>
         public Task<IReadOnlyList<OpenNfsExportV3Entry>> ListExportsV3Async(CancellationToken cancellationToken)
         {
-            return _client.ExecuteV3ProcedureAsync(
+            return _client.ExecuteMountV3ProcedureAsync(
                 CreateMountVoidRequest(OpenNfsV3RpcConstants.MountExportProcedure),
                 "MOUNT v3 EXPORT",
                 OpenNfsTransportPipelineIdempotency.Idempotent,
                 ReadListExportsV3Result,
                 cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to execute a MOUNT v3 <c>EXPORT</c> request without throwing a managed client exception on failure.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for the request.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult<IReadOnlyList<OpenNfsExportV3Entry>>> TryListExportsV3Async(CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => ListExportsV3Async(cancellationToken));
         }
 
         /// <summary>
@@ -95,12 +105,22 @@ namespace OpenNFS.Client.Apis
         /// <returns>The decoded mounted-export entries.</returns>
         public Task<IReadOnlyList<OpenNfsMountedExportV3Entry>> ListMountsV3Async(CancellationToken cancellationToken)
         {
-            return _client.ExecuteV3ProcedureAsync(
+            return _client.ExecuteMountV3ProcedureAsync(
                 CreateMountVoidRequest(OpenNfsV3RpcConstants.MountDumpProcedure),
                 "MOUNT v3 DUMP",
                 OpenNfsTransportPipelineIdempotency.Idempotent,
                 ReadListMountsV3Result,
                 cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to execute a MOUNT v3 <c>DUMP</c> request without throwing a managed client exception on failure.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for the request.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult<IReadOnlyList<OpenNfsMountedExportV3Entry>>> TryListMountsV3Async(CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => ListMountsV3Async(cancellationToken));
         }
 
         /// <summary>
@@ -111,12 +131,24 @@ namespace OpenNFS.Client.Apis
         /// <returns>The decoded typed mount result.</returns>
         public Task<OpenNfsMountV3Result> MountV3Async(string exportPath, CancellationToken cancellationToken)
         {
-            return _client.ExecuteV3ProcedureAsync(
+            return _client.ExecuteMountV3ProcedureAsync(
                 CreateMountPathRequest(OpenNfsV3RpcConstants.MountProcedure, exportPath),
                 "MOUNT v3 MNT",
                 OpenNfsTransportPipelineIdempotency.Idempotent,
                 ReadMountV3Result,
                 cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to execute a MOUNT v3 <c>MNT</c> request without throwing a managed client exception on failure.
+        /// Server-returned non-success mount statuses remain part of the successful typed <see cref="OpenNfsMountV3Result"/> payload.
+        /// </summary>
+        /// <param name="exportPath">Export path to mount.</param>
+        /// <param name="cancellationToken">Cancellation token for the request.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult<OpenNfsMountV3Result>> TryMountV3Async(string exportPath, CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => MountV3Async(exportPath, cancellationToken));
         }
 
         /// <summary>
@@ -127,12 +159,23 @@ namespace OpenNFS.Client.Apis
         /// <returns>A task that completes when the unmount reply has been validated.</returns>
         public Task UnmountV3Async(string exportPath, CancellationToken cancellationToken)
         {
-            return _client.ExecuteV3ProcedureAsync(
+            return _client.ExecuteMountV3ProcedureAsync(
                 CreateMountPathRequest(OpenNfsV3RpcConstants.MountUmountProcedure, exportPath),
                 "MOUNT v3 UMNT",
                 OpenNfsTransportPipelineIdempotency.Idempotent,
                 ReadUnmountV3Result,
                 cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to execute a MOUNT v3 <c>UMNT</c> request without throwing a managed client exception on failure.
+        /// </summary>
+        /// <param name="exportPath">Export path to unmount.</param>
+        /// <param name="cancellationToken">Cancellation token for the request.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult> TryUnmountV3Async(string exportPath, CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => UnmountV3Async(exportPath, cancellationToken));
         }
 
         /// <summary>
@@ -142,12 +185,22 @@ namespace OpenNFS.Client.Apis
         /// <returns>A task that completes when the unmount-all reply has been validated.</returns>
         public Task UnmountAllV3Async(CancellationToken cancellationToken)
         {
-            return _client.ExecuteV3ProcedureAsync(
+            return _client.ExecuteMountV3ProcedureAsync(
                 CreateMountVoidRequest(OpenNfsV3RpcConstants.MountUmountAllProcedure),
                 "MOUNT v3 UMNTALL",
                 OpenNfsTransportPipelineIdempotency.Idempotent,
                 ReadUnmountAllV3Result,
                 cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to execute a MOUNT v3 <c>UMNTALL</c> request without throwing a managed client exception on failure.
+        /// </summary>
+        /// <param name="cancellationToken">Cancellation token for the request.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult> TryUnmountAllV3Async(CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => UnmountAllV3Async(cancellationToken));
         }
 
         /// <summary>

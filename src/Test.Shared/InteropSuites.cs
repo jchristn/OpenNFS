@@ -623,7 +623,15 @@ namespace Test.Shared
                         "EVERYONE@"),
                 },
                 cancellationToken).ConfigureAwait(false);
+            OpenNfsV40SetIdentityResult setIdentityResult = await client.Identity.SetOwnerAndGroupV40Async(
+                noteHandle,
+                "interop-updated-owner@example.test",
+                "interop-updated-group@example.test",
+                cancellationToken).ConfigureAwait(false);
             OpenNfsV40GetAclResult updatedAclResult = await client.Files.GetAclV40Async(
+                noteHandle,
+                cancellationToken).ConfigureAwait(false);
+            OpenNfsV40GetIdentityResult updatedIdentityResult = await client.Identity.GetOwnerAndGroupV40Async(
                 noteHandle,
                 cancellationToken).ConfigureAwait(false);
             OpenNfsV40ReadResult noteRead = await client.Files.ReadV40Async(noteHandle, 0UL, 64U, cancellationToken).ConfigureAwait(false);
@@ -644,12 +652,20 @@ namespace Test.Shared
                 || initialAclResult.Entries.Count != 1
                 || !string.Equals(initialAclResult.Entries[0].Who, "EVERYONE@", StringComparison.Ordinal)
                 || !setAclResult.IsSuccess
+                || !setIdentityResult.IsSuccess
+                || setIdentityResult.Identity is null
+                || !string.Equals(setIdentityResult.Identity.ServerOwner, "interop-updated-owner@example.test", StringComparison.Ordinal)
+                || !string.Equals(setIdentityResult.Identity.ServerOwnerGroup, "interop-updated-group@example.test", StringComparison.Ordinal)
                 || !updatedAclResult.IsSuccess
                 || updatedAclResult.Entries.Count != 2
                 || !string.Equals(updatedAclResult.Entries[0].Who, "interop-user@example.test", StringComparison.Ordinal)
-                || updatedAclResult.Entries[1].EntryType != OpenNfsV40AclEntryType.Deny)
+                || updatedAclResult.Entries[1].EntryType != OpenNfsV40AclEntryType.Deny
+                || !updatedIdentityResult.IsSuccess
+                || updatedIdentityResult.Identity is null
+                || !string.Equals(updatedIdentityResult.Identity.ServerOwner, "interop-updated-owner@example.test", StringComparison.Ordinal)
+                || !string.Equals(updatedIdentityResult.Identity.ServerOwnerGroup, "interop-updated-group@example.test", StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Expected the OpenNFS NFSv4.0 peer path to surface SECINFO, identity mapping, and host-backed ACL round-trips.");
+                throw new InvalidOperationException("Expected the OpenNFS NFSv4.0 peer path to surface SECINFO, identity mapping updates, and host-backed ACL round-trips.");
             }
 
             OpenNfsV40CreateResult createDirectoryResult = await client.Directories.CreateDirectoryV40Async(
@@ -2436,7 +2452,11 @@ namespace Test.Shared
                 "cat /mnt/opennfs/docs/nested.txt; ",
                 "printf 'UPDATED-FROM-LINUX-CLIENT' | dd of=/mnt/opennfs/hello.txt conv=notrunc status=none; ",
                 "sync; ",
-                "cat /mnt/opennfs/hello.txt; ",
+                "for attempt in 1 2 3 4 5; do ",
+                "if cat /mnt/opennfs/hello.txt; then break; fi; ",
+                "if [ \"$attempt\" = \"5\" ]; then exit 1; fi; ",
+                "sleep 1; ",
+                "done; ",
                 "ls -1 /mnt/opennfs; ",
                 "ls -1 /mnt/opennfs/docs; ",
                 "umount /mnt/opennfs");

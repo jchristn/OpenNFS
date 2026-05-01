@@ -294,6 +294,8 @@ namespace Test.Shared
                         {
                             using UdpClient udpServer = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
                             int port = ((IPEndPoint)udpServer.Client.LocalEndPoint!).Port;
+                            TcpListener tcpFailureListener = new TcpListener(IPAddress.Loopback, port);
+                            tcpFailureListener.Start();
                             byte[] expectedReplyPayload = new byte[] { 0x01, 0x02, 0x03, 0x04 };
 
                             Task serverTask = Task.Run(
@@ -323,32 +325,46 @@ namespace Test.Shared
                                         receivedDatagram.RemoteEndPoint).ConfigureAwait(false);
                                 },
                                 cancellationToken);
+                            Task tcpFailureTask = Task.Run(
+                                async () =>
+                                {
+                                    using TcpClient failedClient = await tcpFailureListener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+                                },
+                                cancellationToken);
 
-                            OpenNfsClient client = new OpenNfsClientBuilder()
-                                .WithPrimaryEndpoint(IPAddress.Loopback.ToString(), port)
-                                .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpWithUdpFallbackForNfsV3)
-                                .WithConnectionTimeout(TimeSpan.FromMilliseconds(200))
-                                .WithResponseTimeout(TimeSpan.FromSeconds(2))
-                                .Build();
-
-                            await client.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-                            OpenNfsV3ProcedureReply reply = await client.ExecuteV3ProcedureAsync(
-                                new OpenNfsV3ProcedureRequest(
-                                    procedureNumber: 5,
-                                    procedurePayload: Array.Empty<byte>(),
-                                    retryMode: OpenNfsRetryMode.UseClientPolicy,
-                                    programNumber: 100005,
-                                    versionNumber: 3),
-                                OpenNfsOperationIdempotency.Idempotent,
-                                cancellationToken).ConfigureAwait(false);
-
-                            if (!reply.ReadAcceptedSuccessProcedurePayload().AsSpan().SequenceEqual(expectedReplyPayload))
+                            try
                             {
-                                throw new InvalidOperationException("Expected raw client UDP fallback execution to preserve the accepted-success procedure payload.");
-                            }
+                                OpenNfsClient client = new OpenNfsClientBuilder()
+                                    .WithPrimaryEndpoint(IPAddress.Loopback.ToString(), port)
+                                    .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpWithUdpFallbackForNfsV3)
+                                    .WithConnectionTimeout(TimeSpan.FromMilliseconds(200))
+                                    .WithResponseTimeout(TimeSpan.FromSeconds(2))
+                                    .Build();
 
-                            await serverTask.ConfigureAwait(false);
+                                await client.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                                OpenNfsV3ProcedureReply reply = await client.ExecuteV3ProcedureAsync(
+                                    new OpenNfsV3ProcedureRequest(
+                                        procedureNumber: 5,
+                                        procedurePayload: Array.Empty<byte>(),
+                                        retryMode: OpenNfsRetryMode.UseClientPolicy,
+                                        programNumber: 100005,
+                                        versionNumber: 3),
+                                    OpenNfsOperationIdempotency.Idempotent,
+                                    cancellationToken).ConfigureAwait(false);
+
+                                if (!reply.ReadAcceptedSuccessProcedurePayload().AsSpan().SequenceEqual(expectedReplyPayload))
+                                {
+                                    throw new InvalidOperationException("Expected raw client UDP fallback execution to preserve the accepted-success procedure payload.");
+                                }
+
+                                await serverTask.ConfigureAwait(false);
+                                await tcpFailureTask.ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                tcpFailureListener.Stop();
+                            }
                         }),
                 });
         }

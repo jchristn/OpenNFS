@@ -16,6 +16,10 @@ namespace Sample.OpenNfsServer
 
         public int? Nfs40Port { get; set; }
 
+        public string? Owner { get; set; }
+
+        public string? OwnerGroup { get; set; }
+
         public string? ServerName { get; set; }
 
         public string? SourcePath { get; set; }

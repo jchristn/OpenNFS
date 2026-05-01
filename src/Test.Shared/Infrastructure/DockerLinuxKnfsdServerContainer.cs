@@ -24,45 +24,59 @@ namespace Test.Shared.Infrastructure
 
         public static async Task<DockerLinuxKnfsdServerContainer> StartAsync(CancellationToken cancellationToken)
         {
-            await DockerInteropImages.EnsureBuiltAsync(cancellationToken).ConfigureAwait(false);
+            Exception? lastException = null;
 
-            string containerName = "opennfs-linux-knfsd-" + Guid.NewGuid().ToString("N");
-
-            try
+            for (int attempt = 0; attempt < 2; attempt++)
             {
-                await DockerCli.RunCheckedAsync(
-                    new List<string>
-                    {
-                        "run",
-                        "--detach",
-                        "--name",
-                        containerName,
-                        "--privileged",
-                        "--publish",
-                        "127.0.0.1::20048",
-                        "--publish",
-                        "127.0.0.1::2049",
-                        "--tmpfs",
-                        "/export:rw,mode=0777,size=16m",
-                        DockerInteropImages.LinuxKnfsdServerImage,
-                    },
-                    cancellationToken,
-                    timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                await DockerInteropImages.EnsureBuiltAsync(cancellationToken).ConfigureAwait(false);
 
-                int mountPort = await ReadMappedPortAsync(containerName, "20048/tcp", cancellationToken).ConfigureAwait(false);
-                int nfsPort = await ReadMappedPortAsync(containerName, "2049/tcp", cancellationToken).ConfigureAwait(false);
+                string containerName = "opennfs-linux-knfsd-" + Guid.NewGuid().ToString("N");
 
-                await WaitForTcpAsync("127.0.0.1", mountPort, cancellationToken).ConfigureAwait(false);
-                await WaitForTcpAsync("127.0.0.1", nfsPort, cancellationToken).ConfigureAwait(false);
-                await WaitForNfsV40ReadyAsync("127.0.0.1", nfsPort, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await DockerCli.RunCheckedAsync(
+                        new List<string>
+                        {
+                            "run",
+                            "--detach",
+                            "--name",
+                            containerName,
+                            "--privileged",
+                            "--publish",
+                            "127.0.0.1::20048",
+                            "--publish",
+                            "127.0.0.1::2049",
+                            "--tmpfs",
+                            "/export:rw,mode=0777,size=16m",
+                            DockerInteropImages.LinuxKnfsdServerImage,
+                        },
+                        cancellationToken,
+                        timeout: TimeSpan.FromMinutes(2)).ConfigureAwait(false);
 
-                return new DockerLinuxKnfsdServerContainer(containerName, mountPort, nfsPort);
+                    int mountPort = await ReadMappedPortAsync(containerName, "20048/tcp", cancellationToken).ConfigureAwait(false);
+                    int nfsPort = await ReadMappedPortAsync(containerName, "2049/tcp", cancellationToken).ConfigureAwait(false);
+
+                    await WaitForTcpAsync("127.0.0.1", mountPort, cancellationToken).ConfigureAwait(false);
+                    await WaitForTcpAsync("127.0.0.1", nfsPort, cancellationToken).ConfigureAwait(false);
+                    await WaitForNfsV40ReadyAsync(containerName, "127.0.0.1", nfsPort, cancellationToken).ConfigureAwait(false);
+
+                    return new DockerLinuxKnfsdServerContainer(containerName, mountPort, nfsPort);
+                }
+                catch (Exception exception) when (attempt == 0)
+                {
+                    lastException = exception;
+                    await RemoveContainerAsync(containerName).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await RemoveContainerAsync(containerName).ConfigureAwait(false);
+                    throw;
+                }
             }
-            catch
-            {
-                await RemoveContainerAsync(containerName).ConfigureAwait(false);
-                throw;
-            }
+
+            throw new InvalidOperationException(
+                "The Linux kernel NFS server container did not become NFSv4.0-ready after a clean retry.",
+                lastException);
         }
 
         public Task<string> GetLogsAsync(CancellationToken cancellationToken)
@@ -199,7 +213,7 @@ namespace Test.Shared.Infrastructure
                 lastException);
         }
 
-        private static async Task WaitForNfsV40ReadyAsync(string host, int port, CancellationToken cancellationToken)
+        private static async Task WaitForNfsV40ReadyAsync(string containerName, string host, int port, CancellationToken cancellationToken)
         {
             DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(90);
             Exception? lastException = null;
@@ -230,12 +244,17 @@ namespace Test.Shared.Infrastructure
                 await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
             }
 
+            string logs = await GetLogsAsync(containerName, CancellationToken.None).ConfigureAwait(false);
             throw new TimeoutException(
                 "Timed out waiting for the Linux kernel NFS server container to answer NFSv4.0 root-handle requests on "
                 + host
                 + ":"
                 + port
-                + ".",
+                + "."
+                + Environment.NewLine
+                + "logs:"
+                + Environment.NewLine
+                + logs,
                 lastException);
         }
 

@@ -226,6 +226,20 @@ namespace Test.Shared
                         displayName: "Sample artifact invalidates old filehandles when the persistent mapping file is replaced",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
                         executeAsync: ExecutePersistentFileHandleRestartNegativeAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "SampleServerSuites",
+                        caseId: "CapabilitySurfaceRoundTripsAndPersistsAcrossRestart",
+                        displayName: "Sample artifact exercises ACL, idmap, delegation, and locking flows and persists ACL state across restart",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteCapabilitySurfaceRoundTripsAndPersistsAcrossRestartAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "SampleServerSuites",
+                        caseId: "CapabilitySurfaceReportsNegativeLockAndLookupPaths",
+                        displayName: "Sample artifact reports negative lookup and lock-conflict paths through the public client",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteCapabilitySurfaceReportsNegativeLockAndLookupPathsAsync),
                 },
                 beforeSuiteAsync: probe.IsAvailable
                     ? cancellationToken => new ValueTask(DockerInteropImages.EnsureBuiltAsync(cancellationToken))
@@ -749,6 +763,412 @@ namespace Test.Shared
             }
         }
 
+        private static async Task ExecuteCapabilitySurfaceRoundTripsAndPersistsAcrossRestartAsync(
+            System.Threading.CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.SampleCapabilities", Guid.NewGuid().ToString("N"));
+            string configDirectory = Path.Combine(rootDirectory, "config");
+            string configPath = Path.Combine(configDirectory, "sample-config.json");
+            const string owner = "sample-owner@example.test";
+            const string ownerGroup = "sample-group@example.test";
+
+            OpenNfsV40AclEntry[] updatedEntries =
+            {
+                new OpenNfsV40AclEntry(
+                    OpenNfsV40AclEntryType.Allow,
+                    OpenNfsV40AclEntryFlags.None,
+                    OpenNfsV40AclPermissionMask.ReadData
+                        | OpenNfsV40AclPermissionMask.WriteData
+                        | OpenNfsV40AclPermissionMask.ReadAcl,
+                    "capability-user@example.test"),
+                new OpenNfsV40AclEntry(
+                    OpenNfsV40AclEntryType.Deny,
+                    OpenNfsV40AclEntryFlags.None,
+                    OpenNfsV40AclPermissionMask.Delete,
+                    "EVERYONE@"),
+            };
+
+            try
+            {
+                Directory.CreateDirectory(configDirectory);
+                await WriteSampleConfigurationAsync(
+                    configPath,
+                    new
+                    {
+                        serverName = "Capability Sample",
+                        exportPath = "/exports/sample",
+                        sourcePath = "content/export",
+                        owner,
+                        ownerGroup,
+                        mappingPath = "state/handles.json",
+                        listenerAddress = "0.0.0.0",
+                        mountPort = 20048,
+                        nfsPort = 2049,
+                        nfs40Port = 3049,
+                        denyMounts = false,
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                await using (SampleOpenNfsServerProcess process =
+                    await SampleOpenNfsServerProcess.StartAsync(configPath, cancellationToken).ConfigureAwait(false))
+                {
+                    await using OpenNfsClient client = new OpenNfsClientBuilder()
+                        .WithServer("127.0.0.1", process.Nfs40Port)
+                        .Build();
+                    await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+                    (byte[] _, byte[] docsHandle, byte[] nestedHandle) =
+                        await ResolveSampleV40HandlesAsync(client, cancellationToken).ConfigureAwait(false);
+
+                    OpenNfsV40GetAttributesResult identityAttributesResult = await client.Files.GetAttributesV40Async(
+                        nestedHandle,
+                        new[]
+                        {
+                            OpenNfsV40AttributeKind.Type,
+                            OpenNfsV40AttributeKind.Owner,
+                            OpenNfsV40AttributeKind.OwnerGroup,
+                        },
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40GetAclResult initialAclResult = await client.Files.GetAclV40Async(
+                        nestedHandle,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40SetAclResult setAclResult = await client.Files.SetAclV40Async(
+                        nestedHandle,
+                        updatedEntries,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40SetIdentityResult setIdentityResult = await client.Identity.SetOwnerAndGroupV40Async(
+                        nestedHandle,
+                        "capability-owner@example.test",
+                        "capability-group@example.test",
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40GetAclResult rereadAclResult = await client.Files.GetAclV40Async(
+                        nestedHandle,
+                        cancellationToken).ConfigureAwait(false);
+
+                    byte[] clientVerifier = new byte[] { 0x22, 0x44, 0x66, 0x88, 0xAA, 0xCC, 0xEE, 0x10 };
+                    OpenNfsV40SetClientIdResult setClientIdResult = await client.Sessions.SetClientIdV40Async(
+                        "sample-capability-client",
+                        clientVerifier,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40SessionResult confirmClientIdResult = await client.Sessions.ConfirmClientIdV40Async(
+                        setClientIdResult.ClientId,
+                        setClientIdResult.ConfirmationVerifier.ToArray(),
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40OpenResult delegatedOpenResult = await client.Files.OpenExistingV40Async(
+                        docsHandle,
+                        setClientIdResult.ClientId,
+                        "sample-capability-read-owner",
+                        "nested.txt",
+                        OpenNfsV40ShareAccess.Read,
+                        OpenNfsV40ShareDeny.None,
+                        1U,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40DelegationReturnResult returnDelegationResult = await client.Files.ReturnDelegationV40Async(
+                        nestedHandle,
+                        delegatedOpenResult.Delegation!.StateId,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40OpenResult writeOpenResult = await client.Files.OpenExistingV40Async(
+                        docsHandle,
+                        setClientIdResult.ClientId,
+                        "sample-capability-write-owner",
+                        "nested.txt",
+                        OpenNfsV40ShareAccess.Both,
+                        OpenNfsV40ShareDeny.None,
+                        1U,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40StateIdResult openConfirmResult = await client.Files.ConfirmOpenV40Async(
+                        writeOpenResult.StateId!,
+                        2U,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40LockResult lockResult = await client.Locks.LockFromOpenV40Async(
+                        nestedHandle,
+                        openConfirmResult.StateId!,
+                        3U,
+                        setClientIdResult.ClientId,
+                        "sample-capability-lock-owner",
+                        1U,
+                        OpenNfsV40LockType.Write,
+                        0UL,
+                        5UL,
+                        reclaim: false,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40LockResult unlockResult = await client.Locks.UnlockV40Async(
+                        nestedHandle,
+                        lockResult.StateId!,
+                        2U,
+                        OpenNfsV40LockType.Write,
+                        0UL,
+                        5UL,
+                        cancellationToken).ConfigureAwait(false);
+                    OpenNfsV40StateIdResult closeResult = await client.Files.CloseV40Async(
+                        openConfirmResult.StateId!,
+                        4U,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!identityAttributesResult.IsSuccess
+                        || !string.Equals(identityAttributesResult.Attributes?.Owner, owner, StringComparison.Ordinal)
+                        || !string.Equals(identityAttributesResult.Attributes?.OwnerGroup, ownerGroup, StringComparison.Ordinal)
+                        || !initialAclResult.IsSuccess
+                        || initialAclResult.SupportedAcls != (OpenNfsV40AclSupport.AllowAcl | OpenNfsV40AclSupport.DenyAcl)
+                        || initialAclResult.Entries.Count != 2
+                        || !string.Equals(initialAclResult.Entries[0].Who, owner, StringComparison.Ordinal)
+                        || !string.Equals(initialAclResult.Entries[1].Who, ownerGroup, StringComparison.Ordinal)
+                        || !setAclResult.IsSuccess
+                        || !setIdentityResult.IsSuccess
+                        || setIdentityResult.Identity is null
+                        || !string.Equals(setIdentityResult.Identity.ServerOwner, "capability-owner@example.test", StringComparison.Ordinal)
+                        || !string.Equals(setIdentityResult.Identity.ServerOwnerGroup, "capability-group@example.test", StringComparison.Ordinal)
+                        || !rereadAclResult.IsSuccess
+                        || rereadAclResult.Entries.Count != 2
+                        || !string.Equals(rereadAclResult.Entries[0].Who, "capability-user@example.test", StringComparison.Ordinal)
+                        || rereadAclResult.Entries[1].EntryType != OpenNfsV40AclEntryType.Deny
+                        || !setClientIdResult.IsSuccess
+                        || !confirmClientIdResult.IsSuccess
+                        || !delegatedOpenResult.IsSuccess
+                        || delegatedOpenResult.Delegation is null
+                        || delegatedOpenResult.Delegation.DelegationType != OpenNfsV40DelegationType.Read
+                        || !returnDelegationResult.IsSuccess
+                        || !writeOpenResult.IsSuccess
+                        || writeOpenResult.StateId is null
+                        || !openConfirmResult.IsSuccess
+                        || openConfirmResult.StateId is null
+                        || !lockResult.IsSuccess
+                        || lockResult.StateId is null
+                        || !unlockResult.IsSuccess
+                        || !closeResult.IsSuccess)
+                    {
+                        throw new InvalidOperationException("Expected the sample artifact to surface idmap, ACL, delegation, and lock flows over the public NFSv4.0 client path.");
+                    }
+                }
+
+                await using SampleOpenNfsServerProcess restartedProcess =
+                    await SampleOpenNfsServerProcess.StartAsync(configPath, cancellationToken).ConfigureAwait(false);
+                await using OpenNfsClient restartedClient = new OpenNfsClientBuilder()
+                    .WithServer("127.0.0.1", restartedProcess.Nfs40Port)
+                    .Build();
+                await restartedClient.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+                (byte[] _, byte[] __, byte[] restartedNestedHandle) =
+                    await ResolveSampleV40HandlesAsync(restartedClient, cancellationToken).ConfigureAwait(false);
+                OpenNfsV40GetAttributesResult restartedIdentityAttributesResult = await restartedClient.Files.GetAttributesV40Async(
+                    restartedNestedHandle,
+                    new[]
+                    {
+                        OpenNfsV40AttributeKind.Owner,
+                        OpenNfsV40AttributeKind.OwnerGroup,
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40GetAclResult persistedAclResult = await restartedClient.Files.GetAclV40Async(
+                    restartedNestedHandle,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!restartedIdentityAttributesResult.IsSuccess
+                    || !string.Equals(restartedIdentityAttributesResult.Attributes?.Owner, "capability-owner@example.test", StringComparison.Ordinal)
+                    || !string.Equals(restartedIdentityAttributesResult.Attributes?.OwnerGroup, "capability-group@example.test", StringComparison.Ordinal)
+                    || !persistedAclResult.IsSuccess
+                    || persistedAclResult.Entries.Count != 2
+                    || !string.Equals(persistedAclResult.Entries[0].Who, "capability-user@example.test", StringComparison.Ordinal)
+                    || persistedAclResult.Entries[1].EntryType != OpenNfsV40AclEntryType.Deny)
+                {
+                    throw new InvalidOperationException("Expected the sample artifact to preserve ACL state and updated owner/group mapping across restart.");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
+        }
+
+        private static async Task ExecuteCapabilitySurfaceReportsNegativeLockAndLookupPathsAsync(
+            System.Threading.CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.SampleCapabilitiesNegative", Guid.NewGuid().ToString("N"));
+            string configDirectory = Path.Combine(rootDirectory, "config");
+            string configPath = Path.Combine(configDirectory, "sample-config.json");
+
+            try
+            {
+                Directory.CreateDirectory(configDirectory);
+                await WriteSampleConfigurationAsync(
+                    configPath,
+                    new
+                    {
+                        serverName = "Capability Negative Sample",
+                        exportPath = "/exports/sample",
+                        sourcePath = "content/export",
+                        owner = "sample-owner@example.test",
+                        ownerGroup = "sample-group@example.test",
+                        mappingPath = "state/handles.json",
+                        listenerAddress = "0.0.0.0",
+                        mountPort = 20048,
+                        nfsPort = 2049,
+                        nfs40Port = 3049,
+                        denyMounts = false,
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                await using SampleOpenNfsServerProcess process =
+                    await SampleOpenNfsServerProcess.StartAsync(configPath, cancellationToken).ConfigureAwait(false);
+                await using OpenNfsClient client = new OpenNfsClientBuilder()
+                    .WithServer("127.0.0.1", process.Nfs40Port)
+                    .Build();
+                await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+                (byte[] rootHandle, byte[] docsHandle, byte[] nestedHandle) =
+                    await ResolveSampleV40HandlesAsync(client, cancellationToken).ConfigureAwait(false);
+
+                OpenNfsV40LookupResult missingLookupResult = await client.Directories.LookupV40Async(
+                    rootHandle,
+                    "missing.txt",
+                    cancellationToken).ConfigureAwait(false);
+
+                byte[] verifierA = new byte[] { 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE };
+                OpenNfsV40SetClientIdResult setClientIdResultA = await client.Sessions.SetClientIdV40Async(
+                    "sample-capability-negative-a",
+                    verifierA,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40SessionResult confirmClientIdResultA = await client.Sessions.ConfirmClientIdV40Async(
+                    setClientIdResultA.ClientId,
+                    setClientIdResultA.ConfirmationVerifier.ToArray(),
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40OpenResult openResultA = await client.Files.OpenExistingV40Async(
+                    docsHandle,
+                    setClientIdResultA.ClientId,
+                    "sample-capability-negative-owner-a",
+                    "nested.txt",
+                    OpenNfsV40ShareAccess.Both,
+                    OpenNfsV40ShareDeny.None,
+                    1U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40StateIdResult confirmOpenResultA = await client.Files.ConfirmOpenV40Async(
+                    openResultA.StateId!,
+                    2U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40LockResult initialLockResult = await client.Locks.LockFromOpenV40Async(
+                    nestedHandle,
+                    confirmOpenResultA.StateId!,
+                    3U,
+                    setClientIdResultA.ClientId,
+                    "sample-capability-negative-lock-owner-a",
+                    1U,
+                    OpenNfsV40LockType.Write,
+                    0UL,
+                    8UL,
+                    reclaim: false,
+                    cancellationToken).ConfigureAwait(false);
+
+                byte[] verifierB = new byte[] { 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01 };
+                OpenNfsV40SetClientIdResult setClientIdResultB = await client.Sessions.SetClientIdV40Async(
+                    "sample-capability-negative-b",
+                    verifierB,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40SessionResult confirmClientIdResultB = await client.Sessions.ConfirmClientIdV40Async(
+                    setClientIdResultB.ClientId,
+                    setClientIdResultB.ConfirmationVerifier.ToArray(),
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40OpenResult openResultB = await client.Files.OpenExistingV40Async(
+                    docsHandle,
+                    setClientIdResultB.ClientId,
+                    "sample-capability-negative-owner-b",
+                    "nested.txt",
+                    OpenNfsV40ShareAccess.Both,
+                    OpenNfsV40ShareDeny.None,
+                    1U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40StateIdResult confirmOpenResultB = await client.Files.ConfirmOpenV40Async(
+                    openResultB.StateId!,
+                    2U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40LockResult lockTestResult = await client.Locks.TestV40Async(
+                    nestedHandle,
+                    setClientIdResultB.ClientId,
+                    "sample-capability-negative-test-owner",
+                    OpenNfsV40LockType.Write,
+                    0UL,
+                    8UL,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40LockResult lockDeniedResult = await client.Locks.LockFromOpenV40Async(
+                    nestedHandle,
+                    confirmOpenResultB.StateId!,
+                    3U,
+                    setClientIdResultB.ClientId,
+                    "sample-capability-negative-lock-owner-b",
+                    1U,
+                    OpenNfsV40LockType.Write,
+                    0UL,
+                    8UL,
+                    reclaim: false,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40StateIdResult closeWhileLockedResult = await client.Files.CloseV40Async(
+                    confirmOpenResultA.StateId!,
+                    4U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40LockResult unlockResult = await client.Locks.UnlockV40Async(
+                    nestedHandle,
+                    initialLockResult.StateId!,
+                    2U,
+                    OpenNfsV40LockType.Write,
+                    0UL,
+                    8UL,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40StateIdResult closeResultA = await client.Files.CloseV40Async(
+                    confirmOpenResultA.StateId!,
+                    4U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV40StateIdResult closeResultB = await client.Files.CloseV40Async(
+                    confirmOpenResultB.StateId!,
+                    3U,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (missingLookupResult.Status != OpenNfsV40Status.NoEnt
+                    || !confirmClientIdResultA.IsSuccess
+                    || !openResultA.IsSuccess
+                    || !confirmOpenResultA.IsSuccess
+                    || !initialLockResult.IsSuccess
+                    || !confirmClientIdResultB.IsSuccess
+                    || !openResultB.IsSuccess
+                    || !confirmOpenResultB.IsSuccess
+                    || lockTestResult.Status != OpenNfsV40Status.Denied
+                    || lockTestResult.Conflict is null
+                    || lockDeniedResult.Status != OpenNfsV40Status.Denied
+                    || lockDeniedResult.Conflict is null
+                    || closeWhileLockedResult.Status != OpenNfsV40Status.LocksHeld
+                    || !unlockResult.IsSuccess
+                    || !closeResultA.IsSuccess
+                    || !closeResultB.IsSuccess)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the sample artifact to surface negative lookup, conflicting lock, and lock-held close paths over the public NFSv4.0 client path."
+                        + " lookup=" + missingLookupResult.Status
+                        + " confirmA=" + confirmClientIdResultA.Status
+                        + " openA=" + openResultA.Status
+                        + " confirmOpenA=" + confirmOpenResultA.Status
+                        + " initialLock=" + initialLockResult.Status
+                        + " confirmB=" + confirmClientIdResultB.Status
+                        + " openB=" + openResultB.Status
+                        + " confirmOpenB=" + confirmOpenResultB.Status
+                        + " lockTest=" + lockTestResult.Status
+                        + " lockDenied=" + lockDeniedResult.Status
+                        + " closeWhileLocked=" + closeWhileLockedResult.Status
+                        + " unlock=" + unlockResult.Status
+                        + " closeA=" + closeResultA.Status
+                        + " closeB=" + closeResultB.Status
+                        + " conflictA=" + (lockTestResult.Conflict?.ClientId.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>")
+                        + " conflictB=" + (lockDeniedResult.Conflict?.ClientId.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<null>"));
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(rootDirectory))
+                {
+                    Directory.Delete(rootDirectory, recursive: true);
+                }
+            }
+        }
+
         private static TcpListener CreateReservedListener()
         {
             TcpListener listener = new TcpListener(IPAddress.Any, 0);
@@ -787,7 +1207,11 @@ namespace Test.Shared
                 "cat /mnt/opennfs/docs/nested.txt; ",
                 "printf 'UPDATED-FROM-LINUX-CLIENT' | dd of=/mnt/opennfs/hello.txt conv=notrunc status=none; ",
                 "sync; ",
-                "cat /mnt/opennfs/hello.txt; ",
+                "for attempt in 1 2 3 4 5; do ",
+                "if cat /mnt/opennfs/hello.txt; then break; fi; ",
+                "if [ \"$attempt\" = \"5\" ]; then exit 1; fi; ",
+                "sleep 1; ",
+                "done; ",
                 "ls -1 /mnt/opennfs; ",
                 "ls -1 /mnt/opennfs/docs; ",
                 "umount /mnt/opennfs");
@@ -824,6 +1248,33 @@ namespace Test.Shared
             }
 
             return (rootHandle, lookupResult.ObjectFileHandle.ToArray());
+        }
+
+        private static async Task<(byte[] RootHandle, byte[] DocsHandle, byte[] NestedHandle)> ResolveSampleV40HandlesAsync(
+            OpenNfsClient client,
+            System.Threading.CancellationToken cancellationToken)
+        {
+            OpenNfsV40LookupResult rootLookup = await client.Directories.GetRootV40Async(cancellationToken).ConfigureAwait(false);
+            if (!rootLookup.IsSuccess || rootLookup.ObjectFileHandle.Length == 0)
+            {
+                throw new InvalidOperationException("Expected the sample artifact to return a usable NFSv4.0 root filehandle.");
+            }
+
+            byte[] rootHandle = rootLookup.ObjectFileHandle.ToArray();
+            OpenNfsV40LookupResult docsLookup = await client.Directories.LookupV40Async(rootHandle, "docs", cancellationToken).ConfigureAwait(false);
+            if (!docsLookup.IsSuccess || docsLookup.ObjectFileHandle.Length == 0)
+            {
+                throw new InvalidOperationException("Expected the sample artifact to resolve 'docs' over the NFSv4.0 client path.");
+            }
+
+            byte[] docsHandle = docsLookup.ObjectFileHandle.ToArray();
+            OpenNfsV40LookupResult nestedLookup = await client.Directories.LookupV40Async(docsHandle, "nested.txt", cancellationToken).ConfigureAwait(false);
+            if (!nestedLookup.IsSuccess || nestedLookup.ObjectFileHandle.Length == 0)
+            {
+                throw new InvalidOperationException("Expected the sample artifact to resolve 'nested.txt' over the NFSv4.0 client path.");
+            }
+
+            return (rootHandle, docsHandle, nestedLookup.ObjectFileHandle.ToArray());
         }
 
         private static async Task WriteSampleConfigurationAsync(

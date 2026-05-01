@@ -4,10 +4,9 @@ namespace Sample.OpenNfsServer
     using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
-    using OpenNFS.Protocol.V3.Hosting;
-    using OpenNFS.Protocol.V40.Hosting;
     using OpenNFS.Server;
     using OpenNFS.Server.FileHandles;
+    using Sample.OpenNfsServer.Providers;
 
     internal static class Program
     {
@@ -25,12 +24,19 @@ namespace Sample.OpenNfsServer
                 Directory.CreateDirectory(configuration.SourcePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(configuration.MappingPath) ?? configuration.SourcePath);
                 SampleContentSeeder.EnsureSeeded(configuration.SourcePath);
+                SampleDurableFileSystem fileSystem = new SampleDurableFileSystem(
+                    configuration.SourcePath,
+                    configuration.MappingPath,
+                    configuration.Owner,
+                    configuration.OwnerGroup);
 
                 OpenNfsServerBuilder builder = new OpenNfsServerBuilder()
                     .WithServerName(configuration.ServerName)
                     .WithListenerAddress(configuration.ListenerAddress)
-                    .UseLocalFileSystem()
+                    .UseFileSystem(fileSystem)
                     .UseFileHandleProvider(new PersistentMappingHandleProvider(configuration.MappingPath))
+                    .UseCopyClone(SampleCopyCloneCapability.Instance)
+                    .UseSparseFiles(SampleSparseCapability.Instance)
                     .UseMountAuthorization(configuration.DenyMounts ? SampleMountAuthorization.DenyAll : SampleMountAuthorization.AllowAll)
                     .AddExport(configuration.ExportPath, configuration.SourcePath);
 
@@ -39,7 +45,14 @@ namespace Sample.OpenNfsServer
                     builder.WithListenerPort(configuration.NfsPort);
                 }
 
-                OpenNfsServer server = builder.Build();
+                await using OpenNfsServerApplication application = builder.BuildApplication(
+                    new OpenNfsServerApplicationOptions
+                    {
+                        ListenerAddress = configuration.ListenerAddress,
+                        MountPort = configuration.MountPort,
+                        NfsPort = configuration.NfsPort,
+                        Nfs40Port = configuration.Nfs40Port,
+                    });
 
                 using CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
                 Console.CancelKeyPress += (_, eventArgs) =>
@@ -48,24 +61,15 @@ namespace Sample.OpenNfsServer
                     cancellationTokenSource.Cancel();
                 };
 
-                await using OpenNfsTcpServerHost host = OpenNfsTcpServerHost.Start(
-                    server,
-                    listenerAddress: configuration.ListenerAddress,
-                    mountPort: configuration.MountPort,
-                    nfsPort: configuration.NfsPort);
-                await using OpenNfsTcpNfs40ServerHost nfs40Host = OpenNfsTcpNfs40ServerHost.Start(
-                    server,
-                    listenerAddress: configuration.ListenerAddress,
-                    nfsPort: configuration.Nfs40Port);
-
+                await application.StartAsync(cancellationTokenSource.Token).ConfigureAwait(false);
                 Console.WriteLine("Sample.OpenNfsServer started.");
                 Console.WriteLine(
                     "READY mountPort="
-                    + host.MountPort
+                    + application.MountPort
                     + " nfsPort="
-                    + host.NfsPort
+                    + application.NfsPort
                     + " nfs40Port="
-                    + nfs40Host.NfsPort
+                    + application.Nfs40Port
                     + " exportPath="
                     + configuration.ExportPath);
                 Console.WriteLine("Export source: " + configuration.SourcePath);

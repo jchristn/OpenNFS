@@ -178,6 +178,23 @@ namespace OpenNFS.Protocol.V40.Compound
             };
         }
 
+        internal static nfsstat4 MapIdentityException(Exception exception)
+        {
+            ArgumentNullException.ThrowIfNull(exception);
+
+            return exception switch
+            {
+                UnauthorizedAccessException => nfsstat4.NFS4ERR_ACCESS,
+                PathTooLongException => nfsstat4.NFS4ERR_NAMETOOLONG,
+                DirectoryNotFoundException => nfsstat4.NFS4ERR_NOENT,
+                FileNotFoundException => nfsstat4.NFS4ERR_NOENT,
+                NotSupportedException => nfsstat4.NFS4ERR_NOTSUPP,
+                IOException => nfsstat4.NFS4ERR_IO,
+                ArgumentException => nfsstat4.NFS4ERR_INVAL,
+                _ => nfsstat4.NFS4ERR_SERVERFAULT,
+            };
+        }
+
         internal static bool TryReadComponent(component4? component, out string componentValue, out nfsstat4 errorStatus)
         {
             return TryReadPathSegment(component?.Value?.Value?.Value, out componentValue, out errorStatus);

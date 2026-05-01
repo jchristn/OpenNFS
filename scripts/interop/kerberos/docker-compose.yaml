@@ -1,0 +1,19 @@
+services:
+  kdc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opennfs-kdc
+    image: opennfs/kdc:latest
+    hostname: kdc.example.test
+    ports:
+      - "127.0.0.1:8888:88/tcp"
+      - "127.0.0.1:8888:88/udp"
+      - "127.0.0.1:8749:749/tcp"
+    volumes:
+      - ./keytabs:/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /keytabs/sample.keytab && test -f /keytabs/alice.keytab"]
+      interval: 5s
+      timeout: 3s
+      retries: 12

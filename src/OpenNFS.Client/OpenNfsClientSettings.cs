@@ -45,6 +45,10 @@ namespace OpenNFS.Client
         /// Authentication flavor selected for future RPC exchanges.
         /// Default value: <see cref="OpenNfsAuthenticationFlavor.AuthSys"/>.
         /// </param>
+        /// <param name="authSysCredentials">
+        /// AUTH_SYS identity values used when <paramref name="authenticationFlavor"/> is <see cref="OpenNfsAuthenticationFlavor.AuthSys"/>.
+        /// Default value: <see cref="OpenNfsAuthSysCredentials.Default"/>.
+        /// </param>
         /// <param name="transportPolicy">
         /// Transport policy for future RPC exchanges.
         /// Default value: <see cref="OpenNfsClientTransportPolicy.TcpOnly"/>.
@@ -65,6 +69,10 @@ namespace OpenNFS.Client
         /// Optional dedicated endpoint for MOUNT v3 bootstrap traffic.
         /// Default value: <c>null</c>, which means the primary endpoint is reused.
         /// </param>
+        /// <param name="identityPolicy">
+        /// Optional client-side owner and owner-group normalization policy for NFSv4 identity helpers.
+        /// Default value: <see cref="OpenNfsPassthroughIdentityPolicy.Default"/>.
+        /// </param>
         /// <exception cref="ArgumentException">Thrown when <paramref name="serverHost"/> is empty or whitespace.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when a numeric or timeout value is outside its supported range.</exception>
         public OpenNfsClientSettings(
@@ -74,11 +82,13 @@ namespace OpenNFS.Client
             TimeSpan? connectionTimeout = null,
             TimeSpan? responseTimeout = null,
             OpenNfsAuthenticationFlavor authenticationFlavor = OpenNfsAuthenticationFlavor.AuthSys,
+            OpenNfsAuthSysCredentials? authSysCredentials = null,
             OpenNfsClientTransportPolicy transportPolicy = OpenNfsClientTransportPolicy.TcpOnly,
             IReadOnlyCollection<OpenNfsEndpoint>? alternateEndpoints = null,
             OpenNfsEndpointSelectionMode endpointSelectionMode = OpenNfsEndpointSelectionMode.PrimaryOnly,
             OpenNfsRetryPolicy? retryPolicy = null,
-            OpenNfsEndpoint? mountEndpoint = null)
+            OpenNfsEndpoint? mountEndpoint = null,
+            IOpenNfsClientIdentityPolicy? identityPolicy = null)
         {
             if (string.IsNullOrWhiteSpace(serverHost))
             {
@@ -112,10 +122,12 @@ namespace OpenNFS.Client
             ConnectionTimeout = resolvedConnectionTimeout;
             ResponseTimeout = resolvedResponseTimeout;
             AuthenticationFlavor = authenticationFlavor;
+            AuthSysCredentials = authSysCredentials ?? OpenNfsAuthSysCredentials.Default;
             PrimaryEndpoint = new OpenNfsEndpoint(serverHost, serverPort);
             _ExplicitMountEndpoint = mountEndpoint;
             EndpointSelectionMode = endpointSelectionMode;
             RetryPolicy = retryPolicy ?? new OpenNfsRetryPolicy();
+            IdentityPolicy = identityPolicy ?? OpenNfsPassthroughIdentityPolicy.Default;
             _AlternateEndpoints = CopyAlternateEndpoints(alternateEndpoints, PrimaryEndpoint);
             _CandidateEndpoints = BuildCandidateEndpoints(PrimaryEndpoint, _AlternateEndpoints, EndpointSelectionMode);
         }
@@ -149,6 +161,11 @@ namespace OpenNFS.Client
         /// Gets the configured authentication flavor.
         /// </summary>
         public OpenNfsAuthenticationFlavor AuthenticationFlavor { get; }
+
+        /// <summary>
+        /// Gets the AUTH_SYS identity values used when <see cref="AuthenticationFlavor"/> is <see cref="OpenNfsAuthenticationFlavor.AuthSys"/>.
+        /// </summary>
+        public OpenNfsAuthSysCredentials AuthSysCredentials { get; }
 
         /// <summary>
         /// Gets the configured transport policy.
@@ -214,6 +231,11 @@ namespace OpenNFS.Client
         /// Gets the configured retry policy.
         /// </summary>
         public OpenNfsRetryPolicy RetryPolicy { get; }
+
+        /// <summary>
+        /// Gets the configured client-side owner and owner-group normalization policy.
+        /// </summary>
+        public IOpenNfsClientIdentityPolicy IdentityPolicy { get; }
 
         private static OpenNfsEndpoint[] CopyAlternateEndpoints(IReadOnlyCollection<OpenNfsEndpoint>? alternateEndpoints, OpenNfsEndpoint primaryEndpoint)
         {

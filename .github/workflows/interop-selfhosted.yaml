@@ -1,0 +1,73 @@
+name: interop-selfhosted
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  interop-selfhosted:
+    runs-on:
+      - self-hosted
+      - linux
+      - privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore src/OpenNFS.sln
+
+      - name: Build
+        run: dotnet build src/OpenNFS.sln -c Release --no-restore
+
+      - name: Enforce no explicit skipped tests
+        shell: pwsh
+        run: ./scripts/release/Assert-NoSkippedTests.ps1
+
+      - name: Run privileged interop wrapper
+        shell: pwsh
+        run: ./scripts/interop/Invoke-PrivilegedInterop.ps1 -ResultsDirectory artifacts/interop-privileged
+
+      - name: Execute or plan pjdfstest integration
+        shell: pwsh
+        run: |
+          if ($env:PJDFSTEST_ROOT) {
+            ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest -SuiteRoot $env:PJDFSTEST_ROOT -Subset core -UseSampleServer
+          }
+          else {
+            ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest
+          }
+
+      - name: Execute or plan Connectathon integration
+        shell: pwsh
+        run: |
+          if ($env:CONNECTATHON_ROOT) {
+            ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon -SuiteRoot $env:CONNECTATHON_ROOT -Subset general -UseSampleServer
+          }
+          else {
+            ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon
+          }
+
+      - name: Execute or plan pynfs integration
+        shell: pwsh
+        run: |
+          if ($env:PYNFS_ROOT -and $env:PYNFS_ENTRYPOINT) {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
+          }
+          else {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs
+          }
+
+      - name: Upload self-hosted interop artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selfhosted-interop-results
+          path: artifacts/interop-privileged
+          if-no-files-found: error

@@ -132,15 +132,9 @@ namespace OpenNFS.Client
             return (resolution.FileHandle, entryName);
         }
 
-        internal static InvalidOperationException CreateStatusException(string operationName, string path, OpenNfsV3Status status)
+        internal static OpenNfsV3StatusException CreateStatusException(string operationName, string path, OpenNfsV3Status status)
         {
-            return new InvalidOperationException(
-                operationName
-                + " failed for path '"
-                + path
-                + "' with NFSv3 status "
-                + status
-                + ".");
+            return new OpenNfsV3StatusException(operationName, path, status);
         }
 
         private static string[] NormalizePathComponents(string path, bool allowRootPath)

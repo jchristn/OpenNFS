@@ -1685,6 +1685,166 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ClientGroupedSuites",
+                        caseId: "MountApisHonorDedicatedMountEndpoint",
+                        displayName: "Grouped export enumeration and mount execution honor a dedicated MOUNT endpoint",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            ScriptedRpcExecutor rpcExecutor = new ScriptedRpcExecutor((request, attempt, token) =>
+                            {
+                                if (!string.Equals(attempt.Endpoint.Host, "mount.example", StringComparison.Ordinal)
+                                    || attempt.Endpoint.Port != 20048)
+                                {
+                                    throw new InvalidOperationException("Expected grouped MOUNT traffic to target only the dedicated MOUNT endpoint.");
+                                }
+
+                                RpcGenerated.call_body? callBody = request.CallEnvelope.Header.body?.cbody;
+                                if (callBody is null)
+                                {
+                                    throw new InvalidOperationException("Expected grouped MOUNT execution to emit an RPC call body.");
+                                }
+
+                                return callBody.proc switch
+                                {
+                                    5 => Task.FromResult(
+                                        CreateAcceptedReplyEnvelope(
+                                            request.CallEnvelope.Header.xid,
+                                            new exports
+                                            {
+                                                Value = new exportnode
+                                                {
+                                                    ex_dir = new dirpath
+                                                    {
+                                                        Value = "/srv/mount",
+                                                    },
+                                                    ex_groups = new groups(),
+                                                    ex_next = new exports(),
+                                                },
+                                            },
+                                            static (value, writer) => value.WriteTo(writer))),
+                                    1 => Task.FromResult(
+                                        CreateAcceptedReplyEnvelope(
+                                            request.CallEnvelope.Header.xid,
+                                            new mountres3
+                                            {
+                                                fhs_status = mountstat3.MNT3_OK,
+                                                mountinfo = new mountres3_ok
+                                                {
+                                                    fhandle = new fhandle3
+                                                    {
+                                                        Value = new byte[] { 0x31, 0x32, 0x33, 0x34 },
+                                                    },
+                                                    auth_flavors = new[] { 0, 1 },
+                                                },
+                                            },
+                                            static (value, writer) => value.WriteTo(writer))),
+                                    _ => throw new InvalidOperationException("Expected only MOUNT v3 EXPORT and MNT procedures in this dedicated-endpoint test."),
+                                };
+                            });
+
+                            OpenNfsClient client = new OpenNfsClient(
+                                new OpenNfsClientSettings(
+                                    serverHost: "primary.example",
+                                    serverPort: 2049,
+                                    alternateEndpoints: new[]
+                                    {
+                                        new OpenNfsEndpoint("failover.example", 3049),
+                                    },
+                                    endpointSelectionMode: OpenNfsEndpointSelectionMode.SequentialFailover,
+                                    mountEndpoint: new OpenNfsEndpoint("mount.example", 20048)),
+                                rpcExecutor,
+                                transportPipeline: null);
+
+                            await client.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                            OpenNfsV3ProcedurePlan exportPlan = await client.Exports.PrepareListExportsV3Async(cancellationToken).ConfigureAwait(false);
+                            OpenNfsV3ProcedurePlan mountPlan = await client.Exports.PrepareMountV3Async("/srv/mount", cancellationToken).ConfigureAwait(false);
+                            IReadOnlyList<OpenNfsExportV3Entry> exports = await client.Exports.ListExportsV3Async(cancellationToken).ConfigureAwait(false);
+                            OpenNfsMountV3Result mountResult = await client.Exports.MountV3Async("/srv/mount", cancellationToken).ConfigureAwait(false);
+
+                            if (exportPlan.CandidateEndpoints.Count != 1
+                                || !string.Equals(exportPlan.CandidateEndpoints[0].Host, "mount.example", StringComparison.Ordinal)
+                                || exportPlan.CandidateEndpoints[0].Port != 20048)
+                            {
+                                throw new InvalidOperationException("Expected grouped export planning to use only the dedicated MOUNT endpoint.");
+                            }
+
+                            if (mountPlan.CandidateEndpoints.Count != 1
+                                || !string.Equals(mountPlan.CandidateEndpoints[0].Host, "mount.example", StringComparison.Ordinal)
+                                || mountPlan.CandidateEndpoints[0].Port != 20048)
+                            {
+                                throw new InvalidOperationException("Expected grouped mount planning to use only the dedicated MOUNT endpoint.");
+                            }
+
+                            if (exports.Count != 1
+                                || !string.Equals(exports[0].ExportPath, "/srv/mount", StringComparison.Ordinal))
+                            {
+                                throw new InvalidOperationException("Expected grouped export enumeration to decode the dedicated-endpoint reply.");
+                            }
+
+                            if (!mountResult.IsSuccess
+                                || !mountResult.RootFileHandle.Span.SequenceEqual(new byte[] { 0x31, 0x32, 0x33, 0x34 }))
+                            {
+                                throw new InvalidOperationException("Expected grouped mount execution to decode the dedicated-endpoint reply.");
+                            }
+
+                            if (rpcExecutor.Attempts.Count != 2)
+                            {
+                                throw new InvalidOperationException("Expected one dedicated-endpoint transport attempt per grouped MOUNT request.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientGroupedSuites",
+                        caseId: "ExportEnumerationFailsThroughDedicatedMountEndpoint",
+                        displayName: "Grouped export enumeration fails through the dedicated MOUNT endpoint instead of falling back to the primary endpoint",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            ScriptedRpcExecutor rpcExecutor = new ScriptedRpcExecutor((request, attempt, token) =>
+                            {
+                                throw new IOException(
+                                    "Dedicated MOUNT endpoint "
+                                    + attempt.Endpoint.Host
+                                    + ":"
+                                    + attempt.Endpoint.Port
+                                    + " is unavailable.");
+                            });
+
+                            OpenNfsClient client = new OpenNfsClient(
+                                new OpenNfsClientSettings(
+                                    serverHost: "primary.example",
+                                    serverPort: 2049,
+                                    retryPolicy: new OpenNfsRetryPolicy(maximumAttempts: 1),
+                                    mountEndpoint: new OpenNfsEndpoint("wrong-mount.example", 20049)),
+                                rpcExecutor,
+                                transportPipeline: null);
+
+                            await client.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                            try
+                            {
+                                await client.Exports.ListExportsV3Async(cancellationToken).ConfigureAwait(false);
+                                throw new InvalidOperationException("Expected grouped export enumeration to fail when the dedicated MOUNT endpoint is unavailable.");
+                            }
+                            catch (OpenNfsClientIoException exception)
+                            {
+                                if (!exception.Message.Contains("wrong-mount.example:20049", StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException("Expected the failure to report the dedicated MOUNT endpoint rather than the primary endpoint.");
+                                }
+                            }
+
+                            if (rpcExecutor.Attempts.Count != 1
+                                || !string.Equals(rpcExecutor.Attempts[0].Endpoint.Host, "wrong-mount.example", StringComparison.Ordinal)
+                                || rpcExecutor.Attempts[0].Endpoint.Port != 20049)
+                            {
+                                throw new InvalidOperationException("Expected grouped export enumeration to attempt only the dedicated MOUNT endpoint.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientGroupedSuites",
                         caseId: "MountApisExecuteOverLoopbackTcp",
                         displayName: "Grouped export APIs execute against the default TCP RPC executor",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -1769,6 +1929,8 @@ namespace Test.Shared
                         {
                             using UdpClient udpServer = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
                             int port = ((IPEndPoint)udpServer.Client.LocalEndPoint!).Port;
+                            TcpListener tcpFailureListener = new TcpListener(IPAddress.Loopback, port);
+                            tcpFailureListener.Start();
 
                             Task serverTask = Task.Run(
                                 async () =>
@@ -1808,24 +1970,38 @@ namespace Test.Shared
                                         receivedDatagram.RemoteEndPoint).ConfigureAwait(false);
                                 },
                                 cancellationToken);
+                            Task tcpFailureTask = Task.Run(
+                                async () =>
+                                {
+                                    using TcpClient failedClient = await tcpFailureListener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+                                },
+                                cancellationToken);
 
-                            OpenNfsClient client = new OpenNfsClientBuilder()
-                                .WithPrimaryEndpoint(IPAddress.Loopback.ToString(), port)
-                                .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpWithUdpFallbackForNfsV3)
-                                .WithConnectionTimeout(TimeSpan.FromMilliseconds(200))
-                                .WithResponseTimeout(TimeSpan.FromSeconds(2))
-                                .Build();
-
-                            await client.OpenAsync(cancellationToken).ConfigureAwait(false);
-                            IReadOnlyList<OpenNfsExportV3Entry> exports = await client.Exports.ListExportsV3Async(cancellationToken).ConfigureAwait(false);
-
-                            if (exports.Count != 1
-                                || !string.Equals(exports[0].ExportPath, "/srv/udp", StringComparison.Ordinal))
+                            try
                             {
-                                throw new InvalidOperationException("Expected grouped client execution to decode the UDP fallback reply.");
-                            }
+                                OpenNfsClient client = new OpenNfsClientBuilder()
+                                    .WithPrimaryEndpoint(IPAddress.Loopback.ToString(), port)
+                                    .WithTransportPolicy(OpenNfsClientTransportPolicy.TcpWithUdpFallbackForNfsV3)
+                                    .WithConnectionTimeout(TimeSpan.FromMilliseconds(200))
+                                    .WithResponseTimeout(TimeSpan.FromSeconds(2))
+                                    .Build();
 
-                            await serverTask.ConfigureAwait(false);
+                                await client.OpenAsync(cancellationToken).ConfigureAwait(false);
+                                IReadOnlyList<OpenNfsExportV3Entry> exports = await client.Exports.ListExportsV3Async(cancellationToken).ConfigureAwait(false);
+
+                                if (exports.Count != 1
+                                    || !string.Equals(exports[0].ExportPath, "/srv/udp", StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException("Expected grouped client execution to decode the UDP fallback reply.");
+                                }
+
+                                await serverTask.ConfigureAwait(false);
+                                await tcpFailureTask.ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                tcpFailureListener.Stop();
+                            }
                         }),
                 });
         }

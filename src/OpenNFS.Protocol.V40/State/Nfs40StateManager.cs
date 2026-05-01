@@ -5,6 +5,7 @@ namespace OpenNFS.Protocol.V40.State
     using System.Collections.Generic;
     using System.Security.Cryptography;
     using OpenNFS.Protocol.V40.Generated;
+    using OpenNFS.Server;
     using OpenNFS.Server.Delegations;
 
     internal sealed class Nfs40StateManager
@@ -20,6 +21,7 @@ namespace OpenNFS.Protocol.V40.State
         private readonly Dictionary<string, ReclaimOpenRecord> _reclaimableOpens = new Dictionary<string, ReclaimOpenRecord>(StringComparer.Ordinal);
         private readonly Dictionary<string, OpenStateRecord> _statesByToken = new Dictionary<string, OpenStateRecord>(StringComparer.Ordinal);
         private readonly Dictionary<string, LockStateRecord> _lockStatesByToken = new Dictionary<string, LockStateRecord>(StringComparer.Ordinal);
+        private readonly List<Nfs40ExpiredLockCleanup> _pendingExpiredLockCleanups = new List<Nfs40ExpiredLockCleanup>();
         private DateTimeOffset? _gracePeriodEndsUtc;
         private ulong _nextClientId = 1UL;
         private ulong _nextConfirmToken = 1UL;
@@ -201,6 +203,21 @@ namespace OpenNFS.Protocol.V40.State
                 }
 
                 _gracePeriodEndsUtc = now.Add(_gracePeriodDuration);
+            }
+        }
+
+        internal IReadOnlyList<Nfs40ExpiredLockCleanup> DrainExpiredLockCleanups()
+        {
+            lock (_syncRoot)
+            {
+                if (_pendingExpiredLockCleanups.Count == 0)
+                {
+                    return Array.Empty<Nfs40ExpiredLockCleanup>();
+                }
+
+                Nfs40ExpiredLockCleanup[] drained = _pendingExpiredLockCleanups.ToArray();
+                _pendingExpiredLockCleanups.Clear();
+                return drained;
             }
         }
 
@@ -974,6 +991,11 @@ namespace OpenNFS.Protocol.V40.State
                     return new Nfs40LockTransitionResult(nfsstat4.NFS4ERR_BAD_SEQID);
                 }
 
+                if (pendingOperation.Target is null)
+                {
+                    return new Nfs40LockTransitionResult(nfsstat4.NFS4ERR_SERVERFAULT);
+                }
+
                 LockOwnerRecord lockOwner = new LockOwnerRecord(
                     pendingOperation.Client,
                     pendingOperation.OwnerKey,
@@ -984,6 +1006,10 @@ namespace OpenNFS.Protocol.V40.State
                 LockStateRecord lockState = new LockStateRecord(
                     stateToken,
                     pendingOperation.FileKey,
+                    pendingOperation.Target,
+                    pendingOperation.Offset,
+                    pendingOperation.Length,
+                    pendingOperation.Exclusive,
                     pendingOperation.OpenState,
                     lockOwner);
                 _lockStatesByToken.Add(lockState.TokenKey, lockState);
@@ -1573,7 +1599,22 @@ namespace OpenNFS.Protocol.V40.State
 
             foreach (string stateKey in client.LockStateKeys)
             {
-                _lockStatesByToken.Remove(stateKey);
+                if (_lockStatesByToken.TryGetValue(stateKey, out LockStateRecord? lockState))
+                {
+                    if (lockState.HasActiveLocks)
+                    {
+                        _pendingExpiredLockCleanups.Add(
+                            new Nfs40ExpiredLockCleanup(
+                                lockState.Target,
+                                client.ClientId,
+                                lockState.Owner.OwnerBytes,
+                                lockState.Offset,
+                                lockState.Length,
+                                lockState.Exclusive));
+                    }
+
+                    _lockStatesByToken.Remove(stateKey);
+                }
             }
 
             _clientsById.Remove(client.ClientId);
@@ -1772,6 +1813,37 @@ namespace OpenNFS.Protocol.V40.State
             internal nfsstat4 Status { get; }
         }
 
+        internal sealed class Nfs40ExpiredLockCleanup
+        {
+            internal Nfs40ExpiredLockCleanup(
+                NfsFileHandleTarget target,
+                ulong clientId,
+                byte[] ownerBytes,
+                ulong offset,
+                ulong length,
+                bool exclusive)
+            {
+                Target = new NfsFileHandleTarget(target.ExportPath, target.SourcePath, target.StableIdentity);
+                ClientId = clientId;
+                OwnerBytes = CloneBytes(ownerBytes);
+                Offset = offset;
+                Length = length;
+                Exclusive = exclusive;
+            }
+
+            internal ulong ClientId { get; }
+
+            internal bool Exclusive { get; }
+
+            internal ulong Length { get; }
+
+            internal ulong Offset { get; }
+
+            internal byte[] OwnerBytes { get; }
+
+            internal NfsFileHandleTarget Target { get; }
+        }
+
         internal sealed class Nfs40PendingLockOperation
         {
             internal Nfs40PendingLockOperation(
@@ -1807,11 +1879,19 @@ namespace OpenNFS.Protocol.V40.State
 
             internal string FileKey { get; }
 
+            internal bool Exclusive { get; set; }
+
+            internal ulong Length { get; set; }
+
             internal OpenStateRecord OpenState { get; }
+
+            internal ulong Offset { get; set; }
 
             internal byte[] OwnerBytes { get; }
 
             internal string OwnerKey { get; }
+
+            internal NfsFileHandleTarget? Target { get; set; }
         }
 
         internal sealed class ClientRecord
@@ -2033,25 +2113,41 @@ namespace OpenNFS.Protocol.V40.State
             internal LockStateRecord(
                 byte[] token,
                 string fileKey,
+                NfsFileHandleTarget target,
+                ulong offset,
+                ulong length,
+                bool exclusive,
                 OpenStateRecord openState,
                 LockOwnerRecord owner)
             {
                 Token = CloneBytes(token);
                 TokenKey = Convert.ToHexString(token);
                 FileKey = fileKey;
+                Target = new NfsFileHandleTarget(target.ExportPath, target.SourcePath, target.StableIdentity);
+                Offset = offset;
+                Length = length;
+                Exclusive = exclusive;
                 OpenState = openState;
                 Owner = owner;
             }
 
+            internal bool Exclusive { get; }
+
             internal string FileKey { get; }
 
             internal bool HasActiveLocks { get; set; } = true;
+
+            internal ulong Length { get; }
+
+            internal ulong Offset { get; }
 
             internal OpenStateRecord OpenState { get; }
 
             internal LockOwnerRecord Owner { get; }
 
             internal uint StateSequenceId { get; set; } = 1U;
+
+            internal NfsFileHandleTarget Target { get; }
 
             internal byte[] Token { get; }
 

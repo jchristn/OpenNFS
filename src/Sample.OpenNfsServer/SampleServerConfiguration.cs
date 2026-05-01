@@ -11,6 +11,8 @@ namespace Sample.OpenNfsServer
             string serverName,
             string exportPath,
             string sourcePath,
+            string owner,
+            string ownerGroup,
             string listenerAddress,
             int mountPort,
             int nfsPort,
@@ -22,6 +24,8 @@ namespace Sample.OpenNfsServer
             ServerName = serverName;
             ExportPath = exportPath;
             SourcePath = sourcePath;
+            Owner = owner;
+            OwnerGroup = ownerGroup;
             ListenerAddress = listenerAddress;
             MountPort = mountPort;
             NfsPort = nfsPort;
@@ -44,6 +48,10 @@ namespace Sample.OpenNfsServer
 
         internal int Nfs40Port { get; }
 
+        internal string Owner { get; }
+
+        internal string OwnerGroup { get; }
+
         internal string ServerName { get; }
 
         internal bool ShowHelp { get; }
@@ -60,6 +68,8 @@ namespace Sample.OpenNfsServer
             string serverName = "OpenNFS Sample";
             string exportPath = "/exports/sample";
             string sourcePath = defaultSourcePath;
+            string owner = "sample-owner@example.test";
+            string ownerGroup = "sample-group@example.test";
             string listenerAddress = "0.0.0.0";
             int mountPort = 20048;
             int nfsPort = 2049;
@@ -84,6 +94,8 @@ namespace Sample.OpenNfsServer
                 serverName = ReadConfiguredText(fileConfiguration.ServerName, serverName, nameof(fileConfiguration.ServerName));
                 exportPath = ReadConfiguredText(fileConfiguration.ExportPath, exportPath, nameof(fileConfiguration.ExportPath));
                 sourcePath = ResolveConfiguredPath(fileConfiguration.SourcePath, configDirectory) ?? sourcePath;
+                owner = ReadConfiguredText(fileConfiguration.Owner, owner, nameof(fileConfiguration.Owner));
+                ownerGroup = ReadConfiguredText(fileConfiguration.OwnerGroup, ownerGroup, nameof(fileConfiguration.OwnerGroup));
                 listenerAddress = ReadConfiguredText(fileConfiguration.ListenerAddress, listenerAddress, nameof(fileConfiguration.ListenerAddress));
                 mountPort = ReadConfiguredPort(fileConfiguration.MountPort, mountPort, "mountPort");
                 nfsPort = ReadConfiguredPort(fileConfiguration.NfsPort, nfsPort, "nfsPort");
@@ -122,6 +134,14 @@ namespace Sample.OpenNfsServer
                         sourcePath = ReadRequiredValue(args, ref index, "--source-path");
                         break;
 
+                    case "--owner":
+                        owner = ReadRequiredValue(args, ref index, "--owner");
+                        break;
+
+                    case "--owner-group":
+                        ownerGroup = ReadRequiredValue(args, ref index, "--owner-group");
+                        break;
+
                     case "--listener-address":
                         listenerAddress = ReadRequiredValue(args, ref index, "--listener-address");
                         break;
@@ -157,6 +177,8 @@ namespace Sample.OpenNfsServer
                 serverName,
                 exportPath,
                 normalizedSourcePath,
+                owner,
+                ownerGroup,
                 listenerAddress,
                 mountPort,
                 nfsPort,
@@ -174,6 +196,8 @@ namespace Sample.OpenNfsServer
                 "  --server-name <name>       Friendly server name. Default: OpenNFS Sample",
                 "  --export-path <path>       Export path to advertise. Default: /exports/sample",
                 "  --source-path <path>       Host source directory to export. Default: %TEMP%\\OpenNFS.Sample\\Export",
+                "  --owner <value>            Advertised owner identity for NFSv4 owner attributes. Default: sample-owner@example.test",
+                "  --owner-group <value>      Advertised owner-group identity for NFSv4 owner_group attributes. Default: sample-group@example.test",
                 "  --listener-address <addr>  Listener bind address. Default: 0.0.0.0",
                 "  --mount-port <port>        MOUNT v3 TCP port. Use 0 for an ephemeral port. Default: 20048",
                 "  --nfs-port <port>          NFSv3 TCP port. Use 0 for an ephemeral port. Default: 2049",

@@ -23,9 +23,15 @@ jobs:
       - name: Build
         run: dotnet build src/OpenNFS.sln -c Release --no-restore
 
+      - name: Validate release checklist and plan
+        shell: pwsh
+        run: |
+          ./scripts/release/Assert-ReleaseChecklist.ps1
+          ./scripts/release/Assert-RepositoryHonesty.ps1
+          ./scripts/release/Invoke-ReleaseValidation.ps1 -PlanOnly -IncludePack
+
       - name: Pack OpenNFS.Server
         run: dotnet pack src/OpenNFS.Server/OpenNFS.Server.csproj -c Release --no-build
 
       - name: Pack OpenNFS.Client
         run: dotnet pack src/OpenNFS.Client/OpenNFS.Client.csproj -c Release --no-build
-

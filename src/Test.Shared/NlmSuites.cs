@@ -1065,7 +1065,7 @@ namespace Test.Shared
                                 throw new InvalidOperationException("Expected grouped NLM v4 TEST execution to surface a denied conflict.");
                             }
 
-                            bool sawInvalidData = false;
+                            bool sawProtocolFailure = false;
                             try
                             {
                                 _ = await client.Locks.LockV4Async(
@@ -1082,14 +1082,20 @@ namespace Test.Shared
                                     state: 0,
                                     cancellationToken).ConfigureAwait(false);
                             }
-                            catch (InvalidDataException)
+                            catch (OpenNfsClientProtocolException exception)
                             {
-                                sawInvalidData = true;
+                                if (exception.Category != OpenNfsErrorCategory.ProtocolError
+                                    || !exception.Message.Contains("malformed", StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException("Expected grouped NLM v4 malformed-payload failures to surface a typed protocol exception.");
+                                }
+
+                                sawProtocolFailure = true;
                             }
 
-                            if (!sawInvalidData)
+                            if (!sawProtocolFailure)
                             {
-                                throw new InvalidOperationException("Expected grouped NLM v4 LOCK execution to fail on a malformed payload.");
+                                throw new InvalidOperationException("Expected grouped NLM v4 LOCK execution to fail on a malformed payload with a typed protocol exception.");
                             }
                         }),
 

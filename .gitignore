@@ -16,3 +16,13 @@ TestResults/
 *.DS_Store
 Thumbs.db
 
+# External conformance suite checkouts. Contributors clone these locally; the
+# harness scripts in scripts/interop/ point at their checked-out paths.
+scripts/interop/pjdfstest/external/
+scripts/interop/pynfs/external/
+scripts/interop/connectathon/external/
+
+# Kerberos KDC keytabs are generated at container start and contain key
+# material; never check them in.
+scripts/interop/kerberos/keytabs/*.keytab
+
