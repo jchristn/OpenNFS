@@ -465,7 +465,11 @@ namespace Test.Shared
                                 endpoint: new IPEndPoint(IPAddress.Loopback, host.NfsPort),
                                 clientOwner: BuildClientOwner(verifier: 0xD0, ownerSeed: 200));
                             options.RequestedSlots = 4;
-                            options.CallTimeout = TimeSpan.FromSeconds(15);
+                            // Generous timeouts so the test stays robust on slower CI runners where
+                            // loopback TCP connects + the in-process v4.1 host's EXCHANGE_ID/
+                            // CREATE_SESSION round trips can take longer than the previous 15s budget.
+                            options.ConnectTimeout = TimeSpan.FromSeconds(60);
+                            options.CallTimeout = TimeSpan.FromSeconds(60);
 
                             await using OpenNfsV41ClientSession session = await OpenNfsV41ClientSession
                                 .EstablishAsync(options, cancellationToken)
