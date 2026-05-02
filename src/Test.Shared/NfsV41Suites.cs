@@ -660,6 +660,19 @@ namespace Test.Shared
                             EnsurePublicType(typeof(OpenNfsV41CallbackDispatcher));
                             EnsurePublicType(typeof(Nfs41CallbackChannelHost));
                             EnsurePublicType(typeof(OpenNfsV41PathOperations));
+                            EnsurePublicType(typeof(OpenNfsV41MountSession));
+                            EnsurePublicType(typeof(OpenNfsV41MountSessionMetadata));
+                            EnsurePublicType(typeof(OpenNfsV41MountSessionFiles));
+                            EnsurePublicType(typeof(OpenNfsV41MountSessionDirectories));
+
+                            EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.CreateMountSession));
+                            EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Session));
+                            EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Metadata));
+                            EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Files));
+                            EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Directories));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionMetadata), nameof(OpenNfsV41MountSessionMetadata.GetAttributesAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.ReadAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionDirectories), nameof(OpenNfsV41MountSessionDirectories.ListAsync));
 
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildAttributeMask));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildStatLikeAttributeMask));
@@ -1571,6 +1584,50 @@ namespace Test.Shared
                             }
 
                             return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "MountSessionRoutesPathFirstGetAttributesThroughSession",
+                        displayName: "OpenNfsV41MountSession.Metadata.GetAttributesAsync routes a path-first COMPOUND through the underlying session and surfaces a typed envelope",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            await using OpenNfsTcpNfs41ServerHost host = OpenNfsTcpNfs41ServerHost.Start(
+                                CreateProcessor(),
+                                listenerAddress: "127.0.0.1",
+                                nfsPort: 0);
+                            await using OpenNfsV41ClientSession session = await EstablishClientSessionAsync(host.NfsPort, ownerSeed: 250, cancellationToken).ConfigureAwait(false);
+
+                            OpenNfsV41MountSession mountSession = session.CreateMountSession();
+                            if (!ReferenceEquals(mountSession.Session, session))
+                            {
+                                throw new InvalidOperationException("OpenNfsV41MountSession.Session must reference the source session.");
+                            }
+
+                            OpenNfsV41CompoundResult result = await mountSession.Metadata
+                                .GetAttributesAsync("/anywhere", cancellationToken)
+                                .ConfigureAwait(false);
+
+                            // Server's current v4.1 surface returns NFS4ERR_NOTSUPP for non-session ops.
+                            // The mount-session facade must surface that as a partial-success envelope
+                            // (SEQUENCE OK, terminal op carrying NOTSUPP) without flattening into a
+                            // generic failure or hiding the partial state.
+                            if (!result.ReachedServer)
+                            {
+                                throw new InvalidOperationException("Mount-session GETATTR must reach the server. Failure: " + result.Failure);
+                            }
+
+                            if (!result.HasPartialResults || result.Outcome is null)
+                            {
+                                throw new InvalidOperationException("Mount-session GETATTR against current v4.1 surface must surface partial results.");
+                            }
+
+                            // SEQUENCE was OK; the path-first ops surfaced NOTSUPP.
+                            if (result.OperationsObservedSuccessfully < 1)
+                            {
+                                throw new InvalidOperationException("SEQUENCE inside the GETATTR COMPOUND must be observed as successful.");
+                            }
                         }),
 
                     new TestCaseDescriptor(

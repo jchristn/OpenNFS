@@ -317,6 +317,39 @@ namespace OpenNFS.Client
         }
 
         /// <summary>
+        /// Mounts an export through the current MOUNT v3 bootstrap path with a strongly-typed credential
+        /// argument. The supplied credential's <see cref="OpenNfsClientCredential.Flavor"/> is validated
+        /// against the builder-configured authentication flavor; per-mount routing of the supplied
+        /// AUTH_SYS identity values through the RPC pipeline is tracked as a release follow-up.
+        /// </summary>
+        /// <param name="exportPath">Export path to mount.</param>
+        /// <param name="credential">The typed credential. Use
+        /// <see cref="OpenNfsClientCredential.Anonymous"/> for AUTH_NONE or
+        /// <see cref="OpenNfsClientCredential.FromAuthSys"/> for AUTH_SYS.</param>
+        /// <param name="cancellationToken">Cancellation token for the mount operation.</param>
+        /// <returns>The created export-scoped mounted session.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="credential"/> is null.</exception>
+        /// <exception cref="OpenNfsClientStateException">Thrown when the supplied credential's flavor
+        /// does not match the builder-configured <see cref="OpenNfsClientSettings.AuthenticationFlavor"/>.</exception>
+        /// <exception cref="OpenNfsMountV3StatusException">Thrown when the MOUNT v3 bootstrap reply is not successful.</exception>
+        public Task<OpenNfsMountSession> MountAsync(string exportPath, OpenNfsClientCredential credential, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(credential);
+
+            if (credential.Flavor != Settings.AuthenticationFlavor)
+            {
+                throw new OpenNfsClientStateException(
+                    "The supplied credential flavor (" + credential.Flavor
+                    + ") does not match the builder-configured authentication flavor ("
+                    + Settings.AuthenticationFlavor
+                    + "). Per-call flavor override is tracked as a release follow-up.",
+                    OpenNfsErrorCategory.Unsupported);
+            }
+
+            return MountAsync(exportPath, cancellationToken);
+        }
+
+        /// <summary>
         /// Attempts to mount an export through the current MOUNT v3 bootstrap path without throwing a managed client exception on failure.
         /// </summary>
         /// <param name="exportPath">Export path to mount.</param>
@@ -325,6 +358,22 @@ namespace OpenNFS.Client
         public Task<OpenNfsClientResult<OpenNfsMountSession>> TryMountAsync(string exportPath, CancellationToken cancellationToken)
         {
             return OpenNfsClientResultFactory.TryAsync(() => MountAsync(exportPath, cancellationToken));
+        }
+
+        /// <summary>
+        /// Attempts to mount an export through the current MOUNT v3 bootstrap path with a strongly-typed
+        /// credential argument, surfacing failures through a non-throwing result envelope.
+        /// </summary>
+        /// <param name="exportPath">Export path to mount.</param>
+        /// <param name="credential">The typed credential.</param>
+        /// <param name="cancellationToken">Cancellation token for the mount operation.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult<OpenNfsMountSession>> TryMountAsync(
+            string exportPath,
+            OpenNfsClientCredential credential,
+            CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => MountAsync(exportPath, credential, cancellationToken));
         }
 
         /// <summary>

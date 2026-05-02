@@ -308,6 +308,74 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ClientSurfaceSuites",
+                        caseId: "TypedCredentialMountAsyncSurfaceIsPresent",
+                        displayName: "OpenNfsClient.MountAsync(string, OpenNfsClientCredential, CancellationToken) accepts typed credentials and validates flavor against the builder configuration",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            // Anonymous singleton must report AuthNone.
+                            if (OpenNfsClientCredential.Anonymous.Flavor != OpenNfsAuthenticationFlavor.AuthNone
+                                || OpenNfsClientCredential.Anonymous.AuthSys is not null)
+                            {
+                                throw new InvalidOperationException("OpenNfsClientCredential.Anonymous must carry AuthNone with no AuthSys payload.");
+                            }
+
+                            // FromAuthSys wraps and exposes the supplied identity.
+                            OpenNfsAuthSysCredentials authSys = new OpenNfsAuthSysCredentials("typed-creds-test", 4242, 4243);
+                            OpenNfsClientCredential authSysCredential = OpenNfsClientCredential.FromAuthSys(authSys);
+                            if (authSysCredential.Flavor != OpenNfsAuthenticationFlavor.AuthSys
+                                || !ReferenceEquals(authSysCredential.AuthSys, authSys))
+                            {
+                                throw new InvalidOperationException("OpenNfsClientCredential.FromAuthSys must carry AuthSys with the supplied identity values.");
+                            }
+
+                            // FromAuthSys(null) must throw.
+                            bool nullGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsClientCredential.FromAuthSys(null!);
+                            }
+                            catch (ArgumentNullException)
+                            {
+                                nullGuardFired = true;
+                            }
+
+                            if (!nullGuardFired)
+                            {
+                                throw new InvalidOperationException("OpenNfsClientCredential.FromAuthSys(null) must throw ArgumentNullException.");
+                            }
+
+                            // The MountAsync(string, OpenNfsClientCredential, CancellationToken) overload must be present.
+                            System.Reflection.MethodInfo? typedMountAsync = typeof(OpenNfsClient).GetMethod(
+                                nameof(OpenNfsClient.MountAsync),
+                                new[] { typeof(string), typeof(OpenNfsClientCredential), typeof(System.Threading.CancellationToken) });
+                            if (typedMountAsync is null)
+                            {
+                                throw new InvalidOperationException("OpenNfsClient must expose MountAsync(string, OpenNfsClientCredential, CancellationToken).");
+                            }
+
+                            // Same for TryMountAsync.
+                            System.Reflection.MethodInfo? typedTryMountAsync = typeof(OpenNfsClient).GetMethod(
+                                nameof(OpenNfsClient.TryMountAsync),
+                                new[] { typeof(string), typeof(OpenNfsClientCredential), typeof(System.Threading.CancellationToken) });
+                            if (typedTryMountAsync is null)
+                            {
+                                throw new InvalidOperationException("OpenNfsClient must expose TryMountAsync(string, OpenNfsClientCredential, CancellationToken).");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
+                        caseId: "TypedCredentialMountAsyncRejectsFlavorMismatch",
+                        displayName: "OpenNfsClient.MountAsync(string, OpenNfsClientCredential, ...) rejects a credential whose flavor does not match the builder configuration with a typed Unsupported failure",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteTypedCredentialMountAsyncRejectsFlavorMismatchAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ClientSurfaceSuites",
                         caseId: "PackedClientPackageExecutesFromCleanConsumerApp",
                         displayName: "Packed client package restores and executes from a clean consumer app",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
@@ -870,6 +938,61 @@ namespace Test.Shared
                 {
                     Directory.Delete(rootDirectory, recursive: true);
                 }
+            }
+        }
+
+        private static async Task ExecuteTypedCredentialMountAsyncRejectsFlavorMismatchAsync(CancellationToken cancellationToken)
+        {
+            // Builder defaults to AuthSys; passing an Anonymous (AuthNone) credential must fire the
+            // typed flavor-mismatch guard before any RPC is attempted.
+            await using OpenNfsClient client = new OpenNfsClientBuilder()
+                .WithServer("127.0.0.1", 1)
+                .Build();
+
+            bool thrown = false;
+            try
+            {
+                _ = await client.MountAsync(
+                    "/export",
+                    OpenNfsClientCredential.Anonymous,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OpenNfsClientStateException exception)
+            {
+                if (exception.Category != OpenNfsErrorCategory.Unsupported)
+                {
+                    throw new InvalidOperationException(
+                        "Flavor-mismatch on MountAsync(typed-credential) must surface OpenNfsErrorCategory.Unsupported. Observed: "
+                        + exception.Category);
+                }
+
+                if (!exception.Message.Contains("flavor", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("The flavor-mismatch failure message must mention 'flavor' for actionable diagnostics.");
+                }
+
+                thrown = true;
+            }
+
+            if (!thrown)
+            {
+                throw new InvalidOperationException("MountAsync(typed-credential) must reject a flavor mismatch with OpenNfsClientStateException.");
+            }
+
+            // Null credential must throw ArgumentNullException.
+            bool nullThrown = false;
+            try
+            {
+                _ = await client.MountAsync("/export", credential: null!, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ArgumentNullException)
+            {
+                nullThrown = true;
+            }
+
+            if (!nullThrown)
+            {
+                throw new InvalidOperationException("MountAsync(string, null, CancellationToken) must throw ArgumentNullException.");
             }
         }
 

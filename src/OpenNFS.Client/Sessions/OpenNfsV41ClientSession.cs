@@ -253,6 +253,19 @@ namespace OpenNFS.Client.Sessions
         }
 
         /// <summary>
+        /// Returns a path-first ergonomic facade backed by this session. The facade exposes grouped
+        /// <c>Metadata</c>, <c>Files</c>, and <c>Directories</c> members that mirror the v3
+        /// <see cref="OpenNFS.Client.OpenNfsMountSession"/> shape but route through NFSv4.1 COMPOUNDs
+        /// composed by <see cref="OpenNfsV41PathOperations"/>.
+        /// </summary>
+        /// <returns>The non-owning facade. The facade does not dispose this session.</returns>
+        public OpenNfsV41MountSession CreateMountSession()
+        {
+            ThrowIfDisposed();
+            return new OpenNfsV41MountSession(this);
+        }
+
+        /// <summary>
         /// Sends a COMPOUND through this session, auto-prefixed with a <c>SEQUENCE</c> operation.
         /// </summary>
         /// <param name="operations">The operations to send after SEQUENCE.</param>
