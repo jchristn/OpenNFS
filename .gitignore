@@ -26,3 +26,5 @@ scripts/interop/connectathon/external/
 # material; never check them in.
 scripts/interop/kerberos/keytabs/*.keytab
 
+
+.claude/
