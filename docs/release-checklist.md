@@ -46,7 +46,7 @@ Use this checklist before any branch claims that a protocol version or security 
 ## Documentation and honesty gates
 
 - `README.md`, `OPENNFS.md`, and `CHANGELOG.md` describe only the versions and security modes that passed the required gates.
-- pNFS and RDMA remain explicitly deferred unless a later phase changes scope.
+- pNFS is a permanent non-goal for OpenNFS — no layout protocols, no data-server flows, no advertisement. RDMA remains out of scope for the current release line and may be evaluated as a separate feature line in a later phase.
 - No placeholder implementation, placeholder test gate, or skipped conformance requirement remains for any claimed feature.
 
 ## Sign-off

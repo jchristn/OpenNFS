@@ -42,8 +42,8 @@ It reflects the debate consensus and is intentionally specific enough that a dev
 - NLM v4
 - NSM / statd coordination for lock recovery
 - NFSv4.0
-- NFSv4.1 excluding pNFS
-- NFSv4.2 excluding pNFS
+- NFSv4.1 (excluding the pNFS layout-and-data-server split, which is a permanent non-goal)
+- NFSv4.2 (excluding the pNFS layout-and-data-server split, which is a permanent non-goal)
 - Duplicate request cache for v3
 - Sessions and slot-table exactly-once handling for v4.1+
 - Backchannel / callback support required by the advertised v4.1/v4.2 feature set
@@ -51,12 +51,15 @@ It reflects the debate consensus and is intentionally specific enough that a dev
 - Idmap semantics for v4 owner / owner_group handling
 - Sample server project that can be mounted and exercised by non-OpenNFS clients
 
+### Out of scope (permanent non-goals)
+
+- pNFS layout protocols, layout advertisement, and data-server flows. OpenNFS targets a server-and-client architecture over standard ONC RPC transports; the pNFS layout-and-data-server split is not part of that architecture and never will be. Server implementations that need pNFS should target a different project.
+
 ### Explicitly deferred from the first supported release
 
-- pNFS layout advertisement, layout protocols, and data-server protocols
 - RDMA transport
 
-These deferred items still require architecture-conscious code structure now so later support can be added without breaking public contracts, but they are intentionally excluded from the current release plan.
+This deferred item still requires architecture-conscious code structure now so later support can be added without breaking public contracts, but it is intentionally excluded from the current release plan.
 
 ## Intended Repository Layout
 
@@ -99,7 +102,7 @@ C:\Code\opennfs\
 - `OpenNFS.Rpc`: XDR primitives, record marking, ONC RPC v2 framing, rpcbind / portmap integration, auth envelopes, transport abstractions, replay primitives.
 - `OpenNFS.Protocol.V3`: NFSv3, MOUNT v3, NLM v4, NSM integration points, v3 duplicate request cache behavior.
 - `OpenNFS.Protocol.V40`: NFSv4.0 COMPOUND engine, state, locking, ACLs, idmap, delegation semantics required for v4.0.
-- `OpenNFS.Protocol.V41`: sessions, slot tables, exactly-once handling, backchannel, callbacks, trunking and session management, with code structure that does not preclude a later pNFS implementation.
+- `OpenNFS.Protocol.V41`: sessions, slot tables, exactly-once handling, backchannel, callbacks, trunking and session management. pNFS is a permanent non-goal and is not part of this project's architecture.
 - `OpenNFS.Protocol.V42`: v4.2 extensions such as `READ_PLUS`, `SEEK`, `ALLOCATE`, `DEALLOCATE`, `COPY`, `CLONE`, and other supported v4.2 additions.
 - `OpenNFS.Server`: public server package, builder, host contracts, export model, durable sample-friendly hosting surface.
 - `OpenNFS.Client`: public client package, low-level raw RPC / COMPOUND API plus ergonomic grouped APIs.
@@ -723,24 +726,18 @@ pNFS is intentionally out of scope for the current release line. While implement
 
 ## Phase 15: Explicit Later Phase After First Supported Release
 
-### Milestone 15.1: pNFS implementation track
-
-- [ ] Task: Design and implement pNFS layout-provider abstractions and feature advertisement only after the non-pNFS release is stable.
-  Files: `src/OpenNFS.Server/Abstractions/Capabilities/IPnfsLayoutProvider.cs`, `src/OpenNFS.Protocol.V41/Pnfs/`, `src/OpenNFS.Protocol.V42/Pnfs/`
-  RFC: RFC 8881 Section 13, RFC 5662, RFC 5663, RFC 5664, RFC 8154, RFC 8434, RFC 8435
-  Acceptance: pNFS advertisement remains absent from the current release line, and future implementation does not begin until layout retrieval, return, commit, device-info flows, and conformance coverage are all part of an explicit later phase.
-
-- [ ] Task: Add pNFS-specific conformance and interop coverage when implementation begins.
-  Files: `scripts/interop/pnfs/`, `src/Test.Shared/PnfsSuites.cs`
-  RFC: Same as above
-  Acceptance: No pNFS support claim is made until layout negotiation, data-server routing, recall, and failure recovery are test-covered and passing.
-
-### Milestone 15.2: RDMA evaluation track
+### Milestone 15.1: RDMA evaluation track
 
 - [ ] Task: Evaluate and, if approved later, implement RDMA transport as a separate feature line.
   Files: `src/OpenNFS.Rpc/Transport/Rdma/`, `src/Test.Shared/RdmaSuites.cs`
   RFC: Applicable NFS/RDMA standards adopted at implementation time
   Acceptance: RDMA remains out of scope for the first supported release and cannot silently appear as partially implemented code.
+
+### Out of scope (permanent non-goal): pNFS
+
+OpenNFS does not implement pNFS. Layout protocols, layout advertisement, the layout-and-data-server split, and any RFC 8881 §13 (or RFC 5662 / 5663 / 5664 / 8154 / 8434 / 8435) work are explicit non-goals — not deferred work. There is no pNFS implementation track in this repository and there is no plan to add one. Server implementations that need pNFS should target a different project.
+
+2026-05-02 note: This was previously tracked as a deferred Phase 15.1 milestone. It has been removed from the plan because pNFS will not be implemented. The non-goal language above replaces the deferred track. `README.md`, `docs/release-checklist.md`, and the repository-honesty validator have been updated to match.
 
 ## Definition of Done for First Supported Release
 

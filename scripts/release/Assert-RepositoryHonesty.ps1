@@ -78,8 +78,8 @@ $readme = Get-Content -Path $readmePath -Raw
 $requiredReadmeTokens = @(
     "No protocol version is yet claimed as supported on a release branch.",
     "Broader conformance, CI-hosted interop, wider Linux peer matrices, and release-gate work are still open, so this is not yet a release-support claim.",
-    "Deferred from the first supported release:",
-    "pNFS advertisement, layout protocols, and data-server flows",
+    "Out of scope:",
+    "OpenNFS does not implement pNFS. There is no plan to add it; this is an explicit non-goal, not a deferral.",
     "RDMA transport"
 )
 

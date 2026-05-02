@@ -430,7 +430,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         suiteId: "NfsV42Suites",
                         caseId: "AllAdvertisedOpsBound",
-                        displayName: "Every advertised non-pNFS NFSv4.2 operation has a real typed handler binding that returns a non-null status",
+                        displayName: "Every advertised NFSv4.2 operation has a real typed handler binding that returns a non-null status",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
                         executeAsync: async _ =>
                         {
@@ -444,8 +444,8 @@ namespace Test.Shared
                             Nfs42AdvisoryOperationsProcessor advisoryProcessor = new Nfs42AdvisoryOperationsProcessor();
 
                             // OP_ALLOCATE, OP_COPY, OP_COPY_NOTIFY, OP_DEALLOCATE, OP_IO_ADVISE, OP_OFFLOAD_CANCEL,
-                            // OP_OFFLOAD_STATUS, OP_READ_PLUS, OP_SEEK, OP_WRITE_SAME, OP_CLONE — every non-pNFS
-                            // v4.2 op listed in nfs_opnum4 between 59 and 71.
+                            // OP_OFFLOAD_STATUS, OP_READ_PLUS, OP_SEEK, OP_WRITE_SAME, OP_CLONE — every v4.2
+                            // op in scope (pNFS opnum slots are out of scope for this project).
 
                             ALLOCATE4res allocate = await sparseProcessor.ProcessAllocateAsync(
                                 new ALLOCATE4args { aa_stateid = new stateid4 { seqid = 1, other = new byte[12] }, aa_offset = new offset4 { Value = 0 }, aa_length = new length4 { Value = 1 } },
