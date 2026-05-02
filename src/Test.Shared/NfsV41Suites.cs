@@ -665,6 +665,8 @@ namespace Test.Shared
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildStatLikeAttributeMask));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.SplitPathComponents));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildGetAttributesOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReadOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReaddirOps));
 
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.EstablishAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.SendCompoundAsync));
@@ -1568,6 +1570,167 @@ namespace Test.Shared
                                 throw new InvalidOperationException("BuildStatLikeAttributeMask must include FATTR4_TYPE, FATTR4_SIZE, FATTR4_MODE, and FATTR4_OWNER.");
                             }
 
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsReadCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + READ COMPOUND op sequence with the supplied stateid, offset, and count",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            stateid4 stateid = new stateid4
+                            {
+                                seqid = 7,
+                                other = new byte[12] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 },
+                            };
+
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildReadOps(
+                                "/data/file.bin",
+                                stateid,
+                                offset: 4096,
+                                count: 8192);
+
+                            if (ops.Count != 4
+                                || ops[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || ops[1].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[2].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[3].argop != nfs_opnum4.OP_READ)
+                            {
+                                throw new InvalidOperationException("BuildReadOps must produce PUTROOTFH + 2 LOOKUPs + READ for /data/file.bin.");
+                            }
+
+                            READ4args? readArgs = ops[3].opread;
+                            if (readArgs?.stateid is null
+                                || readArgs.stateid.seqid != 7
+                                || readArgs.stateid.other is not byte[] otherBytes
+                                || otherBytes.Length != 12
+                                || readArgs.offset?.Value != 4096
+                                || readArgs.count?.Value != 8192)
+                            {
+                                throw new InvalidOperationException("READ args must carry the supplied stateid (seqid 7 + 12-byte other), offset 4096, and count 8192.");
+                            }
+
+                            // Root path must produce just PUTROOTFH + READ (server will return ISDIR).
+                            IReadOnlyList<nfs_argop4> rootReadOps = OpenNfsV41PathOperations.BuildReadOps(
+                                string.Empty,
+                                stateid,
+                                offset: 0,
+                                count: 1);
+                            if (rootReadOps.Count != 2
+                                || rootReadOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || rootReadOps[1].argop != nfs_opnum4.OP_READ)
+                            {
+                                throw new InvalidOperationException("Empty path with BuildReadOps must produce exactly PUTROOTFH + READ.");
+                            }
+
+                            // Null stateid must throw.
+                            bool stateidGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildReadOps("/x", stateid: null!, offset: 0, count: 0);
+                            }
+                            catch (ArgumentNullException)
+                            {
+                                stateidGuardFired = true;
+                            }
+
+                            if (!stateidGuardFired)
+                            {
+                                throw new InvalidOperationException("BuildReadOps must reject a null stateid argument.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsReaddirCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + READDIR COMPOUND op sequence with the supplied cookie, verifier, and attribute mask",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            byte[] cookieVerifier = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11 };
+                            bitmap4 mask = OpenNfsV41PathOperations.BuildStatLikeAttributeMask();
+
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildReaddirOps(
+                                "/dir",
+                                cookie: 1024,
+                                cookieVerifier: cookieVerifier,
+                                dircount: 4096,
+                                maxcount: 8192,
+                                attributeMask: mask);
+
+                            if (ops.Count != 3
+                                || ops[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || ops[1].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[2].argop != nfs_opnum4.OP_READDIR)
+                            {
+                                throw new InvalidOperationException("BuildReaddirOps must produce PUTROOTFH + 1 LOOKUP + READDIR for /dir.");
+                            }
+
+                            READDIR4args? readdirArgs = ops[2].opreaddir;
+                            if (readdirArgs?.cookie?.Value != 1024
+                                || readdirArgs.cookieverf?.Value is not byte[] verifierBytes
+                                || !verifierBytes.SequenceEqual(cookieVerifier)
+                                || readdirArgs.dircount?.Value != 4096
+                                || readdirArgs.maxcount?.Value != 8192
+                                || readdirArgs.attr_request is null
+                                || readdirArgs.attr_request.Value is not uint[] attrWords
+                                || !attrWords.SequenceEqual(mask.Value!))
+                            {
+                                throw new InvalidOperationException("READDIR args must carry cookie 1024, the supplied 8-byte verifier, dircount 4096, maxcount 8192, and the supplied attribute mask.");
+                            }
+
+                            // The verifier must be defensively copied: mutating the caller's array
+                            // must not change the produced op.
+                            cookieVerifier[0] = 0x00;
+                            if (readdirArgs.cookieverf!.Value is not byte[] preservedBytes
+                                || preservedBytes[0] != 0xAA)
+                            {
+                                throw new InvalidOperationException("READDIR cookie verifier must be defensively copied so caller mutation cannot tamper with the produced op.");
+                            }
+
+                            // A non-8-byte verifier must be rejected.
+                            bool verifierLengthGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildReaddirOps(
+                                    "/dir",
+                                    cookie: 0,
+                                    cookieVerifier: new byte[7],
+                                    dircount: 1,
+                                    maxcount: 1,
+                                    attributeMask: mask);
+                            }
+                            catch (ArgumentException)
+                            {
+                                verifierLengthGuardFired = true;
+                            }
+
+                            if (!verifierLengthGuardFired)
+                            {
+                                throw new InvalidOperationException("BuildReaddirOps must reject a cookie verifier whose length is not exactly 8 bytes.");
+                            }
+
+                            // Root path must produce just PUTROOTFH + READDIR.
+                            IReadOnlyList<nfs_argop4> rootOps = OpenNfsV41PathOperations.BuildReaddirOps(
+                                string.Empty,
+                                cookie: 0,
+                                cookieVerifier: new byte[8],
+                                dircount: 1,
+                                maxcount: 1,
+                                attributeMask: mask);
+                            if (rootOps.Count != 2
+                                || rootOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || rootOps[1].argop != nfs_opnum4.OP_READDIR)
+                            {
+                                throw new InvalidOperationException("Empty path with BuildReaddirOps must produce exactly PUTROOTFH + READDIR.");
+                            }
+
+                            _ = cancellationToken;
                             return Task.CompletedTask;
                         }),
                 });

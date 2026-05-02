@@ -143,7 +143,108 @@ namespace OpenNFS.Client.Sessions
         {
             ArgumentNullException.ThrowIfNull(attributeMask);
 
-            IReadOnlyList<byte[]> components = SplitPathComponents(path ?? string.Empty);
+            List<nfs_argop4> ops = BuildPathPrefixOps(path ?? string.Empty);
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_GETATTR,
+                opgetattr = new GETATTR4args { attr_request = attributeMask },
+            });
+
+            return ops;
+        }
+
+        /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>READ</c> COMPOUND-op sequence for reading
+        /// at the supplied path. The result is intended to be passed to
+        /// <see cref="OpenNfsV41ClientSession.SendCompoundAsync"/>.
+        /// </summary>
+        /// <param name="path">The path to read, relative to the export root.</param>
+        /// <param name="stateid">The state id authorizing the read. RFC 8881 §18.22.3 requires a valid
+        /// state id (special-zero, special-anonymous, or an open / lock state id).</param>
+        /// <param name="offset">The byte offset to begin reading at.</param>
+        /// <param name="count">The maximum number of bytes to return.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="stateid"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> contains '..' segments.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildReadOps(string path, stateid4 stateid, ulong offset, uint count)
+        {
+            ArgumentNullException.ThrowIfNull(stateid);
+
+            List<nfs_argop4> ops = BuildPathPrefixOps(path ?? string.Empty);
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_READ,
+                opread = new READ4args
+                {
+                    stateid = stateid,
+                    offset = new offset4 { Value = offset },
+                    count = new count4 { Value = count },
+                },
+            });
+
+            return ops;
+        }
+
+        /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>READDIR</c> COMPOUND-op sequence for
+        /// listing the directory at the supplied path. The result is intended to be passed to
+        /// <see cref="OpenNfsV41ClientSession.SendCompoundAsync"/>.
+        /// </summary>
+        /// <param name="path">The directory path, relative to the export root. An empty or "/" path
+        /// targets the export root itself.</param>
+        /// <param name="cookie">The opaque continuation cookie. Pass 0 for the first call.</param>
+        /// <param name="cookieVerifier">The 8-byte cookie verifier. Pass an 8-byte zero array for the
+        /// first call; for continuation calls pass the verifier value returned by the previous reply.</param>
+        /// <param name="dircount">Maximum bytes the server may return for directory entry names + cookies.</param>
+        /// <param name="maxcount">Maximum bytes the server may return overall, including attributes.</param>
+        /// <param name="attributeMask">The per-entry attribute bitmap to request. Use
+        /// <see cref="BuildStatLikeAttributeMask"/> for the common case.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="cookieVerifier"/> or
+        /// <paramref name="attributeMask"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="cookieVerifier"/> length is
+        /// not exactly 8 bytes, or when <paramref name="path"/> contains '..' segments.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildReaddirOps(
+            string path,
+            ulong cookie,
+            byte[] cookieVerifier,
+            uint dircount,
+            uint maxcount,
+            bitmap4 attributeMask)
+        {
+            ArgumentNullException.ThrowIfNull(cookieVerifier);
+            ArgumentNullException.ThrowIfNull(attributeMask);
+
+            if (cookieVerifier.Length != 8)
+            {
+                throw new ArgumentException(
+                    "The READDIR cookie verifier must be exactly 8 bytes per RFC 8881 §18.23.1.",
+                    nameof(cookieVerifier));
+            }
+
+            byte[] verifierCopy = new byte[8];
+            Buffer.BlockCopy(cookieVerifier, 0, verifierCopy, 0, 8);
+
+            List<nfs_argop4> ops = BuildPathPrefixOps(path ?? string.Empty);
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_READDIR,
+                opreaddir = new READDIR4args
+                {
+                    cookie = new nfs_cookie4 { Value = cookie },
+                    cookieverf = new verifier4 { Value = verifierCopy },
+                    dircount = new count4 { Value = dircount },
+                    maxcount = new count4 { Value = maxcount },
+                    attr_request = attributeMask,
+                },
+            });
+
+            return ops;
+        }
+
+        private static List<nfs_argop4> BuildPathPrefixOps(string path)
+        {
+            IReadOnlyList<byte[]> components = SplitPathComponents(path);
             List<nfs_argop4> ops = new List<nfs_argop4>(components.Count + 2)
             {
                 new nfs_argop4 { argop = nfs_opnum4.OP_PUTROOTFH },
@@ -166,12 +267,6 @@ namespace OpenNFS.Client.Sessions
                     },
                 });
             }
-
-            ops.Add(new nfs_argop4
-            {
-                argop = nfs_opnum4.OP_GETATTR,
-                opgetattr = new GETATTR4args { attr_request = attributeMask },
-            });
 
             return ops;
         }
