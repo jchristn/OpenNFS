@@ -17,7 +17,7 @@ namespace Test.Shared.Infrastructure
             IReadOnlyDictionary<string, IReadOnlyList<NfsAclEntry>>? initialEntries = null)
         {
             SupportedAcls = supportedAcls;
-            _entriesByPath = new Dictionary<string, NfsAclEntry[]>(StringComparer.OrdinalIgnoreCase);
+            _entriesByPath = new Dictionary<string, NfsAclEntry[]>(SeparatorAgnosticPathComparer.Instance);
 
             if (initialEntries is null)
             {
@@ -62,6 +62,36 @@ namespace Test.Shared.Infrastructure
             }
 
             return copy;
+        }
+
+        private sealed class SeparatorAgnosticPathComparer : IEqualityComparer<string>
+        {
+            internal static SeparatorAgnosticPathComparer Instance { get; } = new SeparatorAgnosticPathComparer();
+
+            public bool Equals(string? x, string? y)
+            {
+                if (x is null)
+                {
+                    return y is null;
+                }
+
+                if (y is null)
+                {
+                    return false;
+                }
+
+                return string.Equals(Canonicalize(x), Canonicalize(y), StringComparison.OrdinalIgnoreCase);
+            }
+
+            public int GetHashCode(string obj)
+            {
+                return Canonicalize(obj).GetHashCode(StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static string Canonicalize(string value)
+            {
+                return value.Replace('\\', '/');
+            }
         }
     }
 }

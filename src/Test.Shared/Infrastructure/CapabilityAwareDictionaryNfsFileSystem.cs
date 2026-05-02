@@ -25,11 +25,11 @@ namespace Test.Shared.Infrastructure
         internal CapabilityAwareDictionaryNfsFileSystem(IReadOnlyDictionary<string, NfsPathKind> pathKinds)
         {
             ArgumentNullException.ThrowIfNull(pathKinds);
-            _FileContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            _FileContents = new Dictionary<string, byte[]>(SeparatorAgnosticPathComparer.Instance);
             _LockManager = new InMemoryNfsLockManager();
-            _PathKinds = new Dictionary<string, NfsPathKind>(pathKinds, StringComparer.OrdinalIgnoreCase);
-            _PathTimestamps = new Dictionary<string, PathTimestamps>(StringComparer.OrdinalIgnoreCase);
-            _SymbolicLinkTargets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _PathKinds = new Dictionary<string, NfsPathKind>(pathKinds, SeparatorAgnosticPathComparer.Instance);
+            _PathTimestamps = new Dictionary<string, PathTimestamps>(SeparatorAgnosticPathComparer.Instance);
+            _SymbolicLinkTargets = new Dictionary<string, string>(SeparatorAgnosticPathComparer.Instance);
             _nextTimestampTicks = TimestampBaseUtc.UtcTicks;
 
             List<string> initialPaths = new List<string>(_PathKinds.Keys);
@@ -658,7 +658,40 @@ namespace Test.Shared.Infrastructure
                 return string.Empty;
             }
 
-            return sourcePath.TrimEnd('/', '\\');
+            // Canonicalize the separator so '\' and '/' compare equal — server-side path resolution
+            // on Linux can produce mixed-separator strings when an export's source path uses Windows
+            // syntax, and we still need to match those paths against the dictionary entries.
+            return sourcePath.TrimEnd('/', '\\').Replace('\\', '/');
+        }
+
+        private sealed class SeparatorAgnosticPathComparer : IEqualityComparer<string>
+        {
+            internal static SeparatorAgnosticPathComparer Instance { get; } = new SeparatorAgnosticPathComparer();
+
+            public bool Equals(string? x, string? y)
+            {
+                if (x is null)
+                {
+                    return y is null;
+                }
+
+                if (y is null)
+                {
+                    return false;
+                }
+
+                return string.Equals(Canonicalize(x), Canonicalize(y), StringComparison.OrdinalIgnoreCase);
+            }
+
+            public int GetHashCode(string obj)
+            {
+                return Canonicalize(obj).GetHashCode(StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static string Canonicalize(string value)
+            {
+                return value.Replace('\\', '/');
+            }
         }
 
         private static bool IsSourcePathSeparator(char value)

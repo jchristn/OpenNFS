@@ -18,9 +18,15 @@ namespace Test.Shared.Infrastructure
 
         internal TestNfsDelegations(IReadOnlyDictionary<string, NfsDelegationKind>? delegationsByPath = null)
         {
-            _delegationsByPath = delegationsByPath is null
-                ? new Dictionary<string, NfsDelegationKind>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, NfsDelegationKind>(delegationsByPath, StringComparer.OrdinalIgnoreCase);
+            _delegationsByPath = new Dictionary<string, NfsDelegationKind>(SeparatorAgnosticPathComparer.Instance);
+            if (delegationsByPath is not null)
+            {
+                foreach (KeyValuePair<string, NfsDelegationKind> pair in delegationsByPath)
+                {
+                    _delegationsByPath[pair.Key] = pair.Value;
+                }
+            }
+
             _recalls = new List<NfsRecallDelegationRequest>();
             _returns = new List<NfsReturnDelegationRequest>();
         }
@@ -77,11 +83,12 @@ namespace Test.Shared.Infrastructure
 
         internal bool WasRecalled(string sourcePath)
         {
+            string canonical = CanonicalizeSourcePath(sourcePath);
             lock (_syncRoot)
             {
                 for (int index = 0; index < _recalls.Count; index++)
                 {
-                    if (string.Equals(_recalls[index].SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(CanonicalizeSourcePath(_recalls[index].SourcePath), canonical, StringComparison.OrdinalIgnoreCase))
                     {
                         return true;
                     }
@@ -93,11 +100,12 @@ namespace Test.Shared.Infrastructure
 
         internal bool WasReturned(string sourcePath)
         {
+            string canonical = CanonicalizeSourcePath(sourcePath);
             lock (_syncRoot)
             {
                 for (int index = 0; index < _returns.Count; index++)
                 {
-                    if (string.Equals(_returns[index].SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(CanonicalizeSourcePath(_returns[index].SourcePath), canonical, StringComparison.OrdinalIgnoreCase))
                     {
                         return true;
                     }
@@ -105,6 +113,44 @@ namespace Test.Shared.Infrastructure
             }
 
             return false;
+        }
+
+        private static string CanonicalizeSourcePath(string sourcePath)
+        {
+            if (string.IsNullOrEmpty(sourcePath))
+            {
+                return string.Empty;
+            }
+
+            // Normalize separators so a Windows-literal path and a server-side mixed-separator path
+            // (Linux Path.Combine produces 'C:\\export/child' from a Windows-literal parent) compare
+            // equal.
+            return sourcePath.Replace('\\', '/');
+        }
+
+        private sealed class SeparatorAgnosticPathComparer : IEqualityComparer<string>
+        {
+            internal static SeparatorAgnosticPathComparer Instance { get; } = new SeparatorAgnosticPathComparer();
+
+            public bool Equals(string? x, string? y)
+            {
+                if (x is null)
+                {
+                    return y is null;
+                }
+
+                if (y is null)
+                {
+                    return false;
+                }
+
+                return string.Equals(CanonicalizeSourcePath(x), CanonicalizeSourcePath(y), StringComparison.OrdinalIgnoreCase);
+            }
+
+            public int GetHashCode(string obj)
+            {
+                return CanonicalizeSourcePath(obj).GetHashCode(StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         internal string DescribeRecalls()

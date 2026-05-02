@@ -21,6 +21,11 @@ namespace Test.Shared.Infrastructure
             _ownerGroup = ownerGroup;
         }
 
+        private static bool IsAnySeparator(char value)
+        {
+            return value == '/' || value == '\\';
+        }
+
         public Task<NfsGetIdentityResponse> GetIdentityAsync(NfsGetIdentityRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -50,8 +55,21 @@ namespace Test.Shared.Infrastructure
 
         private static string NormalizePath(string path)
         {
-            return System.IO.Path.GetFullPath(path)
-                .TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrEmpty(path))
+            {
+                return string.Empty;
+            }
+
+            // Trim trailing separators and canonicalize '\' to '/' so the same path matches whether
+            // the caller used Windows-literal syntax or a path that picked up a Linux '/' from
+            // server-side Path.Combine on a runner where DirectorySeparatorChar is '/'.
+            string trimmed = path;
+            while (trimmed.Length > 0 && IsAnySeparator(trimmed[trimmed.Length - 1]))
+            {
+                trimmed = trimmed.Substring(0, trimmed.Length - 1);
+            }
+
+            return trimmed.Replace('\\', '/');
         }
     }
 }
