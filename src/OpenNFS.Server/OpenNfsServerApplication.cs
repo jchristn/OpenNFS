@@ -206,7 +206,7 @@ namespace OpenNFS.Server
                         throw;
                     }
 
-                    throw new OpenNfsServerStateException("Failed to start the managed OpenNFS listeners.", exception);
+                    throw new OpenNfsServerStateException("Failed to start the managed OpenNFS listeners.", OpenNfsServerErrorCategory.IoError, exception);
                 }
             }
             finally
@@ -397,6 +397,7 @@ namespace OpenNFS.Server
             {
                 throw new OpenNfsServerStateException(
                     "The internal runtime assembly '" + assemblyName + "' is not available. Ensure the OpenNFS server package includes its bundled protocol runtime assemblies.",
+                    OpenNfsServerErrorCategory.Unsupported,
                     exception);
             }
         }

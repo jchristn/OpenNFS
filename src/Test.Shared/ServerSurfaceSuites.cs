@@ -662,6 +662,60 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ServerSurfaceSuites",
+                        caseId: "ServerExceptionBaseExposesNormalizedCategory",
+                        displayName: "OpenNfsServerException carries a normalized OpenNfsServerErrorCategory mirroring the client surface",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: _ =>
+                        {
+                            OpenNfsServerStateException defaultException = new OpenNfsServerStateException("default");
+                            if (defaultException.Category != OpenNfsServerErrorCategory.Conflict)
+                            {
+                                throw new InvalidOperationException(
+                                    "OpenNfsServerStateException must default to OpenNfsServerErrorCategory.Conflict. Observed: "
+                                    + defaultException.Category);
+                            }
+
+                            OpenNfsServerStateException ioException = new OpenNfsServerStateException(
+                                "bind failure",
+                                OpenNfsServerErrorCategory.IoError);
+                            if (ioException.Category != OpenNfsServerErrorCategory.IoError)
+                            {
+                                throw new InvalidOperationException(
+                                    "OpenNfsServerStateException must honor an explicit IoError category. Observed: "
+                                    + ioException.Category);
+                            }
+
+                            OpenNfsServerStateException unsupportedException = new OpenNfsServerStateException(
+                                "missing runtime",
+                                OpenNfsServerErrorCategory.Unsupported,
+                                new InvalidOperationException("inner"));
+                            if (unsupportedException.Category != OpenNfsServerErrorCategory.Unsupported
+                                || unsupportedException.InnerException is null)
+                            {
+                                throw new InvalidOperationException(
+                                    "OpenNfsServerStateException must honor an explicit Unsupported category and preserve the inner exception. Observed: "
+                                    + unsupportedException.Category
+                                    + ", inner=" + (unsupportedException.InnerException?.Message ?? "<null>"));
+                            }
+
+                            // The base exception type itself is abstract; the property must be defined on the base
+                            // so future typed server exceptions inherit it. Pin via reflection.
+                            System.Reflection.PropertyInfo? categoryProperty = typeof(OpenNfsServerException)
+                                .GetProperty(
+                                    nameof(OpenNfsServerStateException.Category),
+                                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+                            if (categoryProperty is null
+                                || categoryProperty.PropertyType != typeof(OpenNfsServerErrorCategory))
+                            {
+                                throw new InvalidOperationException(
+                                    "OpenNfsServerException must expose Category as a public OpenNfsServerErrorCategory property on the base type so all server-typed exceptions inherit it.");
+                            }
+
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ServerSurfaceSuites",
                         caseId: "ReadmeServerSnippetCompilesFromCleanConsumerApp",
                         displayName: "The canonical README server snippet compiles from a clean packaged consumer app",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
@@ -729,10 +783,17 @@ namespace Test.Shared
 
                 OpenNfsServerResult duplicateStartResult = await firstApplication.TryStartAsync(cancellationToken).ConfigureAwait(false);
                 if (duplicateStartResult.IsSuccess
-                    || duplicateStartResult.Exception is not OpenNfsServerStateException
-                    || !duplicateStartResult.Exception.Message.Contains("already running", StringComparison.OrdinalIgnoreCase))
+                    || duplicateStartResult.Exception is not OpenNfsServerStateException duplicateStartException
+                    || !duplicateStartException.Message.Contains("already running", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException("Expected TryStartAsync to report a typed state failure when the managed OpenNFS application is already running.");
+                }
+
+                if (duplicateStartException.Category != OpenNfsServerErrorCategory.Conflict)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the duplicate-start typed failure to carry OpenNfsServerErrorCategory.Conflict. Observed: "
+                        + duplicateStartException.Category);
                 }
 
                 await using OpenNfsServerApplication secondApplication = new OpenNfsServerBuilder()
@@ -755,6 +816,15 @@ namespace Test.Shared
                     throw new InvalidOperationException("Expected TryStartAsync to report a typed failure envelope when the managed OpenNFS listener ports are already in use.");
                 }
 
+                if (conflictingStartResult.Exception is OpenNfsServerStateException conflictingStartException
+                    && conflictingStartException.Category != OpenNfsServerErrorCategory.IoError
+                    && conflictingStartException.Category != OpenNfsServerErrorCategory.Conflict)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the bind-conflict typed failure to carry OpenNfsServerErrorCategory.IoError (port bind failure) or Conflict. Observed: "
+                        + conflictingStartException.Category);
+                }
+
                 OpenNfsServerResult firstStopResult = await firstApplication.TryStopAsync(cancellationToken).ConfigureAwait(false);
                 if (!firstStopResult.IsSuccess)
                 {
@@ -764,10 +834,17 @@ namespace Test.Shared
                 await firstApplication.DisposeAsync().ConfigureAwait(false);
                 OpenNfsServerResult disposedStartResult = await firstApplication.TryStartAsync(cancellationToken).ConfigureAwait(false);
                 if (disposedStartResult.IsSuccess
-                    || disposedStartResult.Exception is not OpenNfsServerStateException
-                    || !disposedStartResult.Exception.Message.Contains("disposed", StringComparison.OrdinalIgnoreCase))
+                    || disposedStartResult.Exception is not OpenNfsServerStateException disposedStartException
+                    || !disposedStartException.Message.Contains("disposed", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException("Expected TryStartAsync to report a typed state failure after the managed OpenNFS application has been disposed.");
+                }
+
+                if (disposedStartException.Category != OpenNfsServerErrorCategory.Conflict)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the disposed-application typed failure to carry OpenNfsServerErrorCategory.Conflict. Observed: "
+                        + disposedStartException.Category);
                 }
             }
             finally
