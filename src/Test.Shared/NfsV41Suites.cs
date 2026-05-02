@@ -659,6 +659,12 @@ namespace Test.Shared
                             EnsurePublicType(typeof(OpenNfsV41CallbackHandler));
                             EnsurePublicType(typeof(OpenNfsV41CallbackDispatcher));
                             EnsurePublicType(typeof(Nfs41CallbackChannelHost));
+                            EnsurePublicType(typeof(OpenNfsV41PathOperations));
+
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildAttributeMask));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildStatLikeAttributeMask));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.SplitPathComponents));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildGetAttributesOps));
 
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.EstablishAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.SendCompoundAsync));
@@ -1473,7 +1479,116 @@ namespace Test.Shared
                                 throw new InvalidOperationException("A non-session op without preceding SEQUENCE must surface NFS4ERR_OP_NOT_IN_SESSION.");
                             }
                         }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsGetAttributesCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + GETATTR COMPOUND op sequence with the requested attribute mask",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            bitmap4 mask = OpenNfsV41PathOperations.BuildAttributeMask(new ulong[]
+                            {
+                                Nfs41Constants.FATTR4_TYPE,
+                                Nfs41Constants.FATTR4_SIZE,
+                                Nfs41Constants.FATTR4_MODE,
+                            });
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildGetAttributesOps("/foo/bar/baz.txt", mask);
+
+                            if (ops.Count != 5)
+                            {
+                                throw new InvalidOperationException("Expected PUTROOTFH + 3 LOOKUPs + GETATTR for a 3-component path. Observed op count: " + ops.Count);
+                            }
+
+                            if (ops[0].argop != nfs_opnum4.OP_PUTROOTFH)
+                            {
+                                throw new InvalidOperationException("First op must be PUTROOTFH. Observed: " + ops[0].argop);
+                            }
+
+                            string[] expectedComponents = new[] { "foo", "bar", "baz.txt" };
+                            for (int index = 0; index < expectedComponents.Length; index++)
+                            {
+                                nfs_argop4 op = ops[index + 1];
+                                if (op.argop != nfs_opnum4.OP_LOOKUP || op.oplookup?.objname?.Value?.Value?.Value is not byte[] actualBytes)
+                                {
+                                    throw new InvalidOperationException("Op at index " + (index + 1) + " must be a LOOKUP carrying a non-null objname.");
+                                }
+
+                                string actualText = System.Text.Encoding.UTF8.GetString(actualBytes);
+                                if (!string.Equals(actualText, expectedComponents[index], StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException(
+                                        "LOOKUP at index " + (index + 1) + " must carry component '"
+                                        + expectedComponents[index] + "'. Observed: '" + actualText + "'");
+                                }
+                            }
+
+                            nfs_argop4 terminal = ops[4];
+                            if (terminal.argop != nfs_opnum4.OP_GETATTR
+                                || terminal.opgetattr?.attr_request?.Value is not uint[] words
+                                || !words.SequenceEqual(mask.Value!))
+                            {
+                                throw new InvalidOperationException("Terminal op must be GETATTR carrying the supplied attribute mask.");
+                            }
+
+                            // Empty / root path produces just PUTROOTFH + GETATTR.
+                            IReadOnlyList<nfs_argop4> rootOps = OpenNfsV41PathOperations.BuildGetAttributesOps("/", mask);
+                            if (rootOps.Count != 2
+                                || rootOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || rootOps[1].argop != nfs_opnum4.OP_GETATTR)
+                            {
+                                throw new InvalidOperationException("Root path must produce exactly PUTROOTFH + GETATTR.");
+                            }
+
+                            // ".." segments must be rejected.
+                            bool dotDotRejected = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildGetAttributesOps("/foo/../bar", mask);
+                            }
+                            catch (ArgumentException)
+                            {
+                                dotDotRejected = true;
+                            }
+
+                            _ = cancellationToken;
+
+                            if (!dotDotRejected)
+                            {
+                                throw new InvalidOperationException("Path-first operations must reject '..' navigation segments.");
+                            }
+
+                            // The stat-like default mask must include FATTR4_TYPE, FATTR4_SIZE, FATTR4_MODE.
+                            bitmap4 statMask = OpenNfsV41PathOperations.BuildStatLikeAttributeMask();
+                            if (!IsAttributeBitSet(statMask, Nfs41Constants.FATTR4_TYPE)
+                                || !IsAttributeBitSet(statMask, Nfs41Constants.FATTR4_SIZE)
+                                || !IsAttributeBitSet(statMask, Nfs41Constants.FATTR4_MODE)
+                                || !IsAttributeBitSet(statMask, Nfs41Constants.FATTR4_OWNER))
+                            {
+                                throw new InvalidOperationException("BuildStatLikeAttributeMask must include FATTR4_TYPE, FATTR4_SIZE, FATTR4_MODE, and FATTR4_OWNER.");
+                            }
+
+                            return Task.CompletedTask;
+                        }),
                 });
+        }
+
+        private static bool IsAttributeBitSet(bitmap4 mask, ulong attributeIdentifier)
+        {
+            uint[]? words = mask.Value;
+            if (words is null)
+            {
+                return false;
+            }
+
+            int wordIndex = (int)(attributeIdentifier / 32);
+            int bitIndex = (int)(attributeIdentifier % 32);
+            if (wordIndex >= words.Length)
+            {
+                return false;
+            }
+
+            return (words[wordIndex] & (1u << bitIndex)) != 0;
         }
 
         private static utf8str_cs MakeTag(string text)
