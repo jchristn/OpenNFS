@@ -259,12 +259,27 @@ namespace OpenNFS.XdrGen
 
                 string actualSource = await File.ReadAllTextAsync(actualFile, cancellationToken).ConfigureAwait(false);
                 string expectedSource = expectedFiles[actualFile].SourceText;
-                if (!string.Equals(actualSource, expectedSource, StringComparison.Ordinal))
+
+                // The generator always emits LF, but on-disk files may have CRLF after a Git
+                // checkout that translated line endings (Windows runners with core.autocrlf=true
+                // are the typical case). Compare with line endings normalized so the corpus stays
+                // valid no matter how the working tree was hydrated.
+                if (!string.Equals(NormalizeLineEndings(actualSource), NormalizeLineEndings(expectedSource), StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
                         "The checked-in generated output is stale for mapping '" + mapping.Id + "': " + actualFile + ". Run powershell -ExecutionPolicy Bypass -File .\\scripts\\Generate-Xdr.ps1 to regenerate the corpus.");
                 }
             }
+        }
+
+        private static string NormalizeLineEndings(string value)
+        {
+            if (value.Length == 0)
+            {
+                return value;
+            }
+
+            return value.Replace("\r\n", "\n", StringComparison.Ordinal);
         }
 
         private static string ReadRequiredString(JsonElement parent, string propertyName)

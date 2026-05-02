@@ -107,7 +107,7 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string resolvedSourcePath = Path.Combine(request.DirectorySourcePath, request.EntryName);
+            string resolvedSourcePath = CombineSourcePath(request.DirectorySourcePath, request.EntryName);
             return Task.FromResult(new NfsLookupPathResponse(GetPathInfo(resolvedSourcePath)));
         }
 
@@ -121,13 +121,13 @@ namespace Test.Shared.Infrastructure
 
             foreach (KeyValuePair<string, NfsPathKind> pathKind in _PathKinds)
             {
-                string? parentDirectory = Path.GetDirectoryName(pathKind.Key);
+                string? parentDirectory = GetParentSourceDirectory(pathKind.Key);
                 if (!string.Equals(NormalizePath(parentDirectory), normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                string childName = Path.GetFileName(pathKind.Key);
+                string childName = GetSourceFileName(pathKind.Key);
                 entries.Add(new NfsDirectoryEntryInfo(childName, GetPathInfo(pathKind.Key)));
             }
 
@@ -240,7 +240,7 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            string resolvedSourcePath = CombineSourcePath(request.ParentDirectorySourcePath, request.EntryName);
             NfsPathInfo currentPathInfo = GetPathInfo(resolvedSourcePath);
             if (currentPathInfo.Exists)
             {
@@ -272,7 +272,7 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            string resolvedSourcePath = CombineSourcePath(request.ParentDirectorySourcePath, request.EntryName);
             NfsPathInfo currentPathInfo = GetPathInfo(resolvedSourcePath);
             if (currentPathInfo.Exists)
             {
@@ -291,7 +291,7 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string resolvedDestinationPath = Path.Combine(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
+            string resolvedDestinationPath = CombineSourcePath(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
             NfsPathInfo sourcePathInfo = GetPathInfo(request.SourcePath);
             if (!sourcePathInfo.Exists)
             {
@@ -325,7 +325,7 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            string resolvedSourcePath = CombineSourcePath(request.ParentDirectorySourcePath, request.EntryName);
             _PathTimestamps.Remove(resolvedSourcePath);
             _PathKinds.Remove(resolvedSourcePath);
             _FileContents.Remove(resolvedSourcePath);
@@ -339,8 +339,8 @@ namespace Test.Shared.Infrastructure
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
-            string sourceSourcePath = Path.Combine(request.SourceParentDirectorySourcePath, request.SourceEntryName);
-            string destinationSourcePath = Path.Combine(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
+            string sourceSourcePath = CombineSourcePath(request.SourceParentDirectorySourcePath, request.SourceEntryName);
+            string destinationSourcePath = CombineSourcePath(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
 
             if (string.Equals(
                 NormalizePath(sourceSourcePath),
@@ -431,7 +431,7 @@ namespace Test.Shared.Infrastructure
 
             foreach (string candidatePath in _PathKinds.Keys)
             {
-                string? parentDirectory = Path.GetDirectoryName(candidatePath);
+                string? parentDirectory = GetParentSourceDirectory(candidatePath);
                 if (string.Equals(NormalizePath(parentDirectory), normalizedSourcePath, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
@@ -601,7 +601,7 @@ namespace Test.Shared.Infrastructure
 
         private void TouchParentDirectory(string sourcePath)
         {
-            string? parentDirectory = Path.GetDirectoryName(sourcePath);
+            string? parentDirectory = GetParentSourceDirectory(sourcePath);
             if (string.IsNullOrWhiteSpace(parentDirectory))
             {
                 return;
@@ -638,7 +638,7 @@ namespace Test.Shared.Infrastructure
             }
 
             char separator = normalizedCandidatePath[normalizedSourcePath.Length];
-            return separator == Path.DirectorySeparatorChar || separator == Path.AltDirectorySeparatorChar;
+            return IsSourcePathSeparator(separator);
         }
 
         private static string RewritePath(string candidatePath, string sourcePath, string destinationPath)
@@ -658,7 +658,75 @@ namespace Test.Shared.Infrastructure
                 return string.Empty;
             }
 
-            return sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return sourcePath.TrimEnd('/', '\\');
+        }
+
+        private static bool IsSourcePathSeparator(char value)
+        {
+            return value == '/' || value == '\\';
+        }
+
+        private static string CombineSourcePath(string parentDirectory, string entryName)
+        {
+            ArgumentNullException.ThrowIfNull(parentDirectory);
+            ArgumentNullException.ThrowIfNull(entryName);
+
+            string trimmedParent = parentDirectory.TrimEnd('/', '\\');
+            if (trimmedParent.Length == 0)
+            {
+                return entryName;
+            }
+
+            char separator = '\\';
+            for (int index = 0; index < trimmedParent.Length; index++)
+            {
+                if (trimmedParent[index] == '/')
+                {
+                    separator = '/';
+                    break;
+                }
+
+                if (trimmedParent[index] == '\\')
+                {
+                    separator = '\\';
+                    break;
+                }
+            }
+
+            return trimmedParent + separator + entryName.TrimStart('/', '\\');
+        }
+
+        private static string GetParentSourceDirectory(string? sourcePath)
+        {
+            if (string.IsNullOrEmpty(sourcePath))
+            {
+                return string.Empty;
+            }
+
+            string normalized = NormalizePath(sourcePath);
+            for (int index = normalized.Length - 1; index >= 0; index--)
+            {
+                if (IsSourcePathSeparator(normalized[index]))
+                {
+                    return normalized.Substring(0, index);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string GetSourceFileName(string sourcePath)
+        {
+            string normalized = NormalizePath(sourcePath);
+            for (int index = normalized.Length - 1; index >= 0; index--)
+            {
+                if (IsSourcePathSeparator(normalized[index]))
+                {
+                    return normalized.Substring(index + 1);
+                }
+            }
+
+            return normalized;
         }
 
         private readonly struct PathTimestamps

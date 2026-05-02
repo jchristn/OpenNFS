@@ -46,11 +46,14 @@ $violations = New-Object System.Collections.Generic.List[string]
 foreach ($searchRoot in $searchRoots) {
     Get-ChildItem -Path $searchRoot -Recurse -File | Where-Object {
         $extension = [System.IO.Path]::GetExtension($_.FullName)
-        $relativeToRepo = $_.FullName.Substring($RepositoryRoot.Length).TrimStart('\')
+        # Normalize on '/' so the same exclusion rules apply on Windows and Linux runners. Native
+        # PowerShell on Windows hands back '\'-separated paths; native PowerShell on Linux hands
+        # back '/'-separated paths. The validator must behave identically on both.
+        $relativeToRepo = $_.FullName.Substring($RepositoryRoot.Length).TrimStart('\').TrimStart('/').Replace('\', '/')
         $allowedExtensions -contains $extension `
-            -and $_.FullName -notmatch '\\(bin|obj|Generated)\\' `
-            -and $relativeToRepo -notmatch '^src\\Test\.' `
-            -and $relativeToRepo -ne 'scripts\release\Assert-RepositoryHonesty.ps1'
+            -and $relativeToRepo -notmatch '(^|/)(bin|obj|Generated)/' `
+            -and $relativeToRepo -notmatch '^src/Test\.' `
+            -and $relativeToRepo -ne 'scripts/release/Assert-RepositoryHonesty.ps1'
     } | ForEach-Object {
         $relativePath = Resolve-Path -Relative $_.FullName
         foreach ($pattern in $bannedPatterns) {

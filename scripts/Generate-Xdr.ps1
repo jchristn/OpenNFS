@@ -8,6 +8,8 @@ $arguments = @(
     "run",
     "--project",
     $projectPath,
+    "--framework",
+    "net8.0",
     "--",
     "--config",
     $ConfigurationPath
