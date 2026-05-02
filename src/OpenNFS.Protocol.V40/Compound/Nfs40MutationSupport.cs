@@ -49,7 +49,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             char separator = normalizedCandidatePath[normalizedParentPath.Length];
-            return separator == Path.DirectorySeparatorChar || separator == Path.AltDirectorySeparatorChar;
+            return OpenNFS.Server.Internal.NfsSourcePath.IsSeparator(separator);
         }
 
         internal static bool IsSamePath(string leftPath, string rightPath)
@@ -247,7 +247,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return string.Empty;
             }
 
-            return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return path.TrimEnd('/', '\\');
         }
 
         private static bool TryReadPathSegment(byte[]? bytes, out string componentValue, out nfsstat4 errorStatus)

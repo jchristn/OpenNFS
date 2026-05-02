@@ -2000,7 +2000,7 @@ namespace OpenNFS.Protocol.V40.Compound
                         return CreateOpenResult(nfsstat4.NFS4ERR_NOTDIR);
                     }
 
-                    string targetSourcePath = Path.Combine(refreshedHandle.Target.SourcePath, entryName);
+                    string targetSourcePath = OpenNFS.Server.Internal.NfsSourcePath.Combine(refreshedHandle.Target.SourcePath, entryName);
                     fileKey = BuildOpenFileKey(refreshedHandle.Target.ExportPath, targetSourcePath);
                     nfsstat4 validationStatus = _stateManager.ValidateOpen(
                         arguments.owner?.clientid,
@@ -3061,7 +3061,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateRenameResult(nfsstat4.NFS4ERR_NOTSUPP);
             }
 
-            string destinationSourcePath = Path.Combine(refreshedTargetDirectory.Target.SourcePath, newName);
+            string destinationSourcePath = OpenNFS.Server.Internal.NfsSourcePath.Combine(refreshedTargetDirectory.Target.SourcePath, newName);
             if (sourceChildPathInfo.Kind == NfsPathKind.Directory
                 && Nfs40MutationSupport.IsDescendantPath(destinationSourcePath, sourceChildPathInfo.Path))
             {
@@ -3834,7 +3834,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return (null, nfsstat4.NFS4ERR_NOENT);
             }
 
-            string? parentSourcePath = Path.GetDirectoryName(currentHandle.Target.SourcePath);
+            string? parentSourcePath = OpenNFS.Server.Internal.NfsSourcePath.GetDirectoryName(currentHandle.Target.SourcePath);
             if (string.IsNullOrWhiteSpace(parentSourcePath))
             {
                 return (null, nfsstat4.NFS4ERR_NOENT);

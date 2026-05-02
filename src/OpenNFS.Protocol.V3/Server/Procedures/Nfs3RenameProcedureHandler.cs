@@ -85,7 +85,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 return CreateFailureResult(nfsstat3.NFS3ERR_NOTSUPP, currentFromDirectoryWcc, currentToDirectoryWcc);
             }
 
-            string destinationSourcePath = Path.Combine(toDirectoryTarget.SourcePath, toEntryName);
+            string destinationSourcePath = OpenNFS.Server.Internal.NfsSourcePath.Combine(toDirectoryTarget.SourcePath, toEntryName);
             if (fromChildPathInfo.Kind == NfsPathKind.Directory
                 && IsPathDescendantOf(destinationSourcePath, fromChildPathInfo.Path))
             {
@@ -260,12 +260,12 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             }
 
             char separator = normalizedCandidatePath[normalizedSourcePath.Length];
-            return separator == Path.DirectorySeparatorChar || separator == Path.AltDirectorySeparatorChar;
+            return OpenNFS.Server.Internal.NfsSourcePath.IsSeparator(separator);
         }
 
         private static string NormalizePath(string path)
         {
-            return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return path.TrimEnd('/', '\\');
         }
     }
 }
