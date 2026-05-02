@@ -18,7 +18,9 @@ namespace Sample.OpenNfsServer
             int nfsPort,
             int nfs40Port,
             string mappingPath,
-            bool denyMounts)
+            bool denyMounts,
+            string? kerberosTargetSpn,
+            string? kerberosKeytab)
         {
             ShowHelp = showHelp;
             ServerName = serverName;
@@ -32,6 +34,8 @@ namespace Sample.OpenNfsServer
             Nfs40Port = nfs40Port;
             MappingPath = mappingPath;
             DenyMounts = denyMounts;
+            KerberosTargetSpn = kerberosTargetSpn;
+            KerberosKeytab = kerberosKeytab;
         }
 
         internal bool DenyMounts { get; }
@@ -58,6 +62,10 @@ namespace Sample.OpenNfsServer
 
         internal string SourcePath { get; }
 
+        internal string? KerberosTargetSpn { get; }
+
+        internal string? KerberosKeytab { get; }
+
         internal static SampleServerConfiguration Parse(string[] args)
         {
             ArgumentNullException.ThrowIfNull(args);
@@ -76,6 +84,8 @@ namespace Sample.OpenNfsServer
             int nfs40Port = 3049;
             string? mappingPath = null;
             string? configPath = null;
+            string? kerberosTargetSpn = null;
+            string? kerberosKeytab = null;
 
             for (int index = 0; index < args.Length; index++)
             {
@@ -102,6 +112,8 @@ namespace Sample.OpenNfsServer
                 nfs40Port = ReadConfiguredPort(fileConfiguration.Nfs40Port, nfs40Port, "nfs40Port");
                 mappingPath = ResolveConfiguredPath(fileConfiguration.MappingPath, configDirectory) ?? mappingPath;
                 denyMounts = fileConfiguration.DenyMounts ?? denyMounts;
+                kerberosTargetSpn = fileConfiguration.KerberosTargetSpn ?? kerberosTargetSpn;
+                kerberosKeytab = ResolveConfiguredPath(fileConfiguration.KerberosKeytab, configDirectory) ?? kerberosKeytab;
             }
 
             for (int index = 0; index < args.Length; index++)
@@ -162,6 +174,14 @@ namespace Sample.OpenNfsServer
                         mappingPath = ReadRequiredValue(args, ref index, "--mapping-path");
                         break;
 
+                    case "--kerberos-spn":
+                        kerberosTargetSpn = ReadRequiredValue(args, ref index, "--kerberos-spn");
+                        break;
+
+                    case "--kerberos-keytab":
+                        kerberosKeytab = ReadRequiredValue(args, ref index, "--kerberos-keytab");
+                        break;
+
                     default:
                         throw new ArgumentException("Unknown Sample.OpenNfsServer argument '" + args[index] + "'.");
                 }
@@ -171,6 +191,8 @@ namespace Sample.OpenNfsServer
             string normalizedMappingPath = Path.GetFullPath(
                 mappingPath
                 ?? (normalizedSourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".handles.json"));
+
+            string? normalizedKerberosKeytab = kerberosKeytab is null ? null : Path.GetFullPath(kerberosKeytab);
 
             return new SampleServerConfiguration(
                 showHelp,
@@ -184,7 +206,9 @@ namespace Sample.OpenNfsServer
                 nfsPort,
                 nfs40Port,
                 normalizedMappingPath,
-                denyMounts);
+                denyMounts,
+                kerberosTargetSpn,
+                normalizedKerberosKeytab);
         }
 
         internal static string GetUsage()
@@ -204,6 +228,8 @@ namespace Sample.OpenNfsServer
                 "  --nfs40-port <port>        NFSv4.0 TCP port. Use 0 for an ephemeral port. Default: 3049",
                 "  --mapping-path <path>      Persistent filehandle mapping path. Default: <source-path>.handles.json",
                 "  --deny-mounts              Deny all mount requests while still starting the sample host.",
+                "  --kerberos-spn <spn>       Optional RPCSEC_GSS Kerberos target SPN (e.g. nfs/sample.example.test@EXAMPLE.TEST).",
+                "  --kerberos-keytab <path>   Optional path to a server keytab. Sets KRB5_KTNAME for the process.",
                 "  --help                     Show this help text.");
         }
 

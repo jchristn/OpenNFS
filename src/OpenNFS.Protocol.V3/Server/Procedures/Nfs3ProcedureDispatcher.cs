@@ -9,18 +9,25 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
     using OpenNFS.Protocol.V3.Replay;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Security.RpcSecGss;
 
     internal sealed class Nfs3ProcedureDispatcher
     {
         private readonly Nfs3DuplicateRequestCache _duplicateRequestCache;
         private readonly Dictionary<uint, INfs3ProcedureHandler> _handlers;
+        private readonly RpcSecGssAuthenticator? _rpcSecGssAuthenticator;
+        private readonly IRpcSecGssMechanism? _rpcSecGssMechanism;
 
         internal Nfs3ProcedureDispatcher(
             IReadOnlyCollection<INfs3ProcedureHandler>? handlers = null,
-            Nfs3DuplicateRequestCache? duplicateRequestCache = null)
+            Nfs3DuplicateRequestCache? duplicateRequestCache = null,
+            RpcSecGssAuthenticator? rpcSecGssAuthenticator = null,
+            IRpcSecGssMechanism? rpcSecGssMechanism = null)
         {
             _duplicateRequestCache = duplicateRequestCache ?? new Nfs3DuplicateRequestCache();
             _handlers = new Dictionary<uint, INfs3ProcedureHandler>();
+            _rpcSecGssAuthenticator = rpcSecGssAuthenticator;
+            _rpcSecGssMechanism = rpcSecGssMechanism;
 
             if (handlers is null)
             {
@@ -86,6 +93,19 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                         status: accept_stat.PROG_MISMATCH,
                         mismatchLowVersion: (uint)NFS_PROGRAM_Program.Version_NFS_V3,
                         mismatchHighVersion: (uint)NFS_PROGRAM_Program.Version_NFS_V3);
+            }
+
+            if (_rpcSecGssAuthenticator is not null)
+            {
+                RpcSecGssCallDisposition gssDisposition = await RpcSecGssCallProcessor.ProcessAsync(
+                    request,
+                    _rpcSecGssAuthenticator,
+                    _rpcSecGssMechanism,
+                    cancellationToken).ConfigureAwait(false);
+                if (!gssDisposition.ContinueProcessing)
+                {
+                    return gssDisposition.Reply!;
+                }
             }
 
             if (!Nfs3ProcedureCatalog.TryGetByProcedureNumber(callBody.proc, out _))

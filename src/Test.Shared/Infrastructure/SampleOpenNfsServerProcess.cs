@@ -25,7 +25,8 @@ namespace Test.Shared.Infrastructure
             Task standardErrorTask,
             int mountPort,
             int nfsPort,
-            int nfs40Port)
+            int nfs40Port,
+            string kerberosTargetSpn)
         {
             _process = process;
             _standardOutput = standardOutput;
@@ -35,6 +36,7 @@ namespace Test.Shared.Infrastructure
             MountPort = mountPort;
             NfsPort = nfsPort;
             Nfs40Port = nfs40Port;
+            KerberosTargetSpn = kerberosTargetSpn;
         }
 
         internal int MountPort { get; }
@@ -43,10 +45,23 @@ namespace Test.Shared.Infrastructure
 
         internal int Nfs40Port { get; }
 
+        internal string KerberosTargetSpn { get; }
+
         internal static async Task<SampleOpenNfsServerProcess> StartAsync(
             string sourcePath,
             string mappingPath,
             bool denyMounts,
+            CancellationToken cancellationToken)
+        {
+            return await StartAsync(sourcePath, mappingPath, denyMounts, kerberosTargetSpn: null, kerberosKeytab: null, cancellationToken).ConfigureAwait(false);
+        }
+
+        internal static async Task<SampleOpenNfsServerProcess> StartAsync(
+            string sourcePath,
+            string mappingPath,
+            bool denyMounts,
+            string? kerberosTargetSpn,
+            string? kerberosKeytab,
             CancellationToken cancellationToken)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
@@ -71,6 +86,18 @@ namespace Test.Shared.Infrastructure
             if (denyMounts)
             {
                 sampleArguments.Add("--deny-mounts");
+            }
+
+            if (!string.IsNullOrWhiteSpace(kerberosTargetSpn))
+            {
+                sampleArguments.Add("--kerberos-spn");
+                sampleArguments.Add(kerberosTargetSpn);
+            }
+
+            if (!string.IsNullOrWhiteSpace(kerberosKeytab))
+            {
+                sampleArguments.Add("--kerberos-keytab");
+                sampleArguments.Add(Path.GetFullPath(kerberosKeytab));
             }
 
             return await StartCoreAsync(sampleArguments, cancellationToken).ConfigureAwait(false);
@@ -147,8 +174,8 @@ namespace Test.Shared.Infrastructure
                 throw new InvalidOperationException("The dotnet CLI could not be started for Sample.OpenNfsServer.", exception);
             }
 
-            TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port)> readyTcs =
-                new TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port, string Kerberos)> readyTcs =
+                new TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port, string Kerberos)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             StringBuilder standardOutput = new StringBuilder();
             StringBuilder standardError = new StringBuilder();
@@ -159,9 +186,9 @@ namespace Test.Shared.Infrastructure
                 {
                     standardOutput.AppendLine(line);
 
-                    if (TryParseReadyLine(line, out int mountPort, out int nfsPort, out int nfs40Port))
+                    if (TryParseReadyLine(line, out int mountPort, out int nfsPort, out int nfs40Port, out string kerberos))
                     {
-                        readyTcs.TrySetResult((mountPort, nfsPort, nfs40Port));
+                        readyTcs.TrySetResult((mountPort, nfsPort, nfs40Port, kerberos));
                     }
                 });
 
@@ -183,7 +210,7 @@ namespace Test.Shared.Infrastructure
                 Task completedTask = await Task.WhenAny(readyTcs.Task, exitTask, delayTask).ConfigureAwait(false);
                 if (completedTask == readyTcs.Task)
                 {
-                    (int mountPort, int nfsPort, int nfs40Port) = await readyTcs.Task.ConfigureAwait(false);
+                    (int mountPort, int nfsPort, int nfs40Port, string kerberos) = await readyTcs.Task.ConfigureAwait(false);
                     return new SampleOpenNfsServerProcess(
                         process,
                         standardOutput,
@@ -192,7 +219,8 @@ namespace Test.Shared.Infrastructure
                         standardErrorTask,
                         mountPort,
                         nfsPort,
-                        nfs40Port);
+                        nfs40Port,
+                        kerberos);
                 }
 
                 if (completedTask == exitTask)
@@ -329,11 +357,12 @@ namespace Test.Shared.Infrastructure
             return false;
         }
 
-        private static bool TryParseReadyLine(string line, out int mountPort, out int nfsPort, out int nfs40Port)
+        private static bool TryParseReadyLine(string line, out int mountPort, out int nfsPort, out int nfs40Port, out string kerberos)
         {
             mountPort = 0;
             nfsPort = 0;
             nfs40Port = 0;
+            kerberos = string.Empty;
 
             if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("READY ", StringComparison.Ordinal))
             {
@@ -351,6 +380,11 @@ namespace Test.Shared.Infrastructure
                 }
 
                 values[tokens[index].Substring(0, separatorIndex)] = tokens[index].Substring(separatorIndex + 1);
+            }
+
+            if (values.TryGetValue("kerberos", out string? kerberosValue))
+            {
+                kerberos = kerberosValue;
             }
 
             return values.TryGetValue("mountPort", out string? mountPortValue)

@@ -635,7 +635,7 @@ namespace Test.Shared
                             await using OpenNfsServerApplication application = builder.BuildApplication(
                                 new OpenNfsServerApplicationOptions
                                 {
-                                    EnableNfsV3 = false,
+                                    EnableNfsV3 = true,
                                     EnableNfs40 = false,
                                 });
 

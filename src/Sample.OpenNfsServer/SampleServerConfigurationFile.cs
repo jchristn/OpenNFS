@@ -23,5 +23,9 @@ namespace Sample.OpenNfsServer
         public string? ServerName { get; set; }
 
         public string? SourcePath { get; set; }
+
+        public string? KerberosTargetSpn { get; set; }
+
+        public string? KerberosKeytab { get; set; }
     }
 }

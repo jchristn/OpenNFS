@@ -1344,6 +1344,114 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV41Suites",
+                        caseId: "SessionReplayAfterReconnect",
+                        displayName: "Wire-level COMPOUND replays the cached reply byte-for-byte when the same slot is retried over a fresh TCP connection",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            await using OpenNfsTcpNfs41ServerHost host = OpenNfsTcpNfs41ServerHost.Start(
+                                CreateProcessor(),
+                                listenerAddress: "127.0.0.1",
+                                nfsPort: 0);
+
+                            byte[] sessionIdBytes;
+                            byte[] firstSequencePayload;
+
+                            // Establish session and issue the cached SEQUENCE on the first connection.
+                            using (TcpClient firstTcp = new TcpClient())
+                            {
+                                await firstTcp.ConnectAsync(IPAddress.Loopback, host.NfsPort, cancellationToken).ConfigureAwait(false);
+                                using NetworkStream firstStream = firstTcp.GetStream();
+                                RpcTcpTransport firstTransport = new RpcTcpTransport(
+                                    firstStream,
+                                    new RpcTransportOptions(timeouts: new RpcTransportTimeouts(
+                                        readTimeout: TimeSpan.FromSeconds(15),
+                                        writeTimeout: TimeSpan.FromSeconds(15))));
+
+                                COMPOUND4args bootstrap = new COMPOUND4args
+                                {
+                                    tag = MakeTag("reconnect-bootstrap"),
+                                    minorversion = 1,
+                                    argarray = new[]
+                                    {
+                                        new nfs_argop4 { argop = nfs_opnum4.OP_EXCHANGE_ID, opexchange_id = BuildExchangeIdArguments(0xC5, 122) },
+                                    },
+                                };
+                                COMPOUND4res bootstrapResponse = await SendCompoundOverTransportAsync(firstTransport, bootstrap, xid: 2001, cancellationToken).ConfigureAwait(false);
+                                EnsureSuccess(bootstrapResponse.status, "reconnect EXCHANGE_ID");
+                                ulong clientId = bootstrapResponse.resarray![0].opexchange_id!.eir_resok4!.eir_clientid!.Value;
+                                uint sequenceId = bootstrapResponse.resarray![0].opexchange_id!.eir_resok4!.eir_sequenceid!.Value;
+
+                                COMPOUND4args createSession = new COMPOUND4args
+                                {
+                                    tag = MakeTag("reconnect-create"),
+                                    minorversion = 1,
+                                    argarray = new[]
+                                    {
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_CREATE_SESSION,
+                                            opcreate_session = BuildCreateSessionArguments(clientId, sequenceId, requestedSlots: 4),
+                                        },
+                                    },
+                                };
+                                COMPOUND4res createSessionResponse = await SendCompoundOverTransportAsync(firstTransport, createSession, xid: 2002, cancellationToken).ConfigureAwait(false);
+                                EnsureSuccess(createSessionResponse.status, "reconnect CREATE_SESSION");
+                                sessionIdBytes = createSessionResponse.resarray![0].opcreate_session!.csr_resok4!.csr_sessionid!.Value!;
+
+                                COMPOUND4args cachedSequence = new COMPOUND4args
+                                {
+                                    tag = MakeTag("reconnect-cached"),
+                                    minorversion = 1,
+                                    argarray = new[]
+                                    {
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_SEQUENCE,
+                                            opsequence = BuildSequenceArguments(sessionIdBytes, slotId: 0, sequenceId: 1, cacheThis: true, highestSlotId: 3),
+                                        },
+                                    },
+                                };
+                                firstSequencePayload = await SendCompoundRawOverTransportAsync(firstTransport, cachedSequence, xid: 2003, cancellationToken).ConfigureAwait(false);
+                            }
+
+                            // Reconnect on a fresh TCP socket and replay the same SEQUENCE on slot 0.
+                            byte[] replayPayload;
+                            using (TcpClient secondTcp = new TcpClient())
+                            {
+                                await secondTcp.ConnectAsync(IPAddress.Loopback, host.NfsPort, cancellationToken).ConfigureAwait(false);
+                                using NetworkStream secondStream = secondTcp.GetStream();
+                                RpcTcpTransport secondTransport = new RpcTcpTransport(
+                                    secondStream,
+                                    new RpcTransportOptions(timeouts: new RpcTransportTimeouts(
+                                        readTimeout: TimeSpan.FromSeconds(15),
+                                        writeTimeout: TimeSpan.FromSeconds(15))));
+
+                                COMPOUND4args replaySequence = new COMPOUND4args
+                                {
+                                    tag = MakeTag("reconnect-cached"),
+                                    minorversion = 1,
+                                    argarray = new[]
+                                    {
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_SEQUENCE,
+                                            opsequence = BuildSequenceArguments(sessionIdBytes, slotId: 0, sequenceId: 1, cacheThis: true, highestSlotId: 3),
+                                        },
+                                    },
+                                };
+                                replayPayload = await SendCompoundRawOverTransportAsync(secondTransport, replaySequence, xid: 2004, cancellationToken).ConfigureAwait(false);
+                            }
+
+                            if (!firstSequencePayload.SequenceEqual(replayPayload))
+                            {
+                                throw new InvalidOperationException(
+                                    "After a TCP reconnect, replaying the same SEQUENCE on slot 0 must surface a byte-stable cached reply per RFC 8881 §2.10.6.1 exactly-once semantics.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
                         caseId: "WireCompoundRejectsOperationsBeforeSequence",
                         displayName: "Wire-level COMPOUND surfaces NFS4ERR_OP_NOT_IN_SESSION when a non-session op precedes SEQUENCE",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -1635,6 +1743,34 @@ namespace Test.Shared
             COMPOUND4res value = COMPOUND4res.ReadFrom(reader);
             reader.EnsureFullyConsumed();
             return value;
+        }
+
+        private static async Task<byte[]> SendCompoundRawOverTransportAsync(
+            RpcTcpTransport transport,
+            COMPOUND4args arguments,
+            uint xid,
+            CancellationToken cancellationToken)
+        {
+            XdrWriter argumentsWriter = new XdrWriter();
+            arguments.WriteTo(argumentsWriter);
+
+            RpcMessageEnvelope request = RpcMessageFactory.CreateCall(
+                xid: xid,
+                program: (uint)NFS4_PROGRAM_Program.Program,
+                version: (uint)NFS4_PROGRAM_Program.Version_NFS_V4,
+                procedure: (uint)NFS4_PROGRAM_Program.Procedure_NFS_V4_NFSPROC4_COMPOUND,
+                credential: RpcAuthenticationCodec.CreateNone(),
+                verifier: RpcAuthenticationCodec.CreateNone(),
+                procedurePayload: argumentsWriter.ToArray());
+
+            await transport.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            RpcMessageEnvelope reply = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+            if (reply.Header.body?.rbody?.areply?.reply_data?.stat != accept_stat.SUCCESS)
+            {
+                throw new InvalidOperationException("Real-network COMPOUND dispatch must produce an accepted SUCCESS reply.");
+            }
+
+            return reply.ProcedurePayload.ToArray();
         }
 
         private static async Task<byte[]> EstablishSessionOverWireAsync(

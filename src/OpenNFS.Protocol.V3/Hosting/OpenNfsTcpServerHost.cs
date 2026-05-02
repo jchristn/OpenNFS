@@ -123,7 +123,11 @@ namespace OpenNFS.Protocol.V3.Hosting
 
             IPAddress bindAddress = ResolveBindAddress(listenerAddress ?? server.Settings.ListenerAddress);
             MountV3Service mountService = new MountV3Service(server);
-            Nfs3ProcedureDispatcher dispatcher = new Nfs3ProcedureDispatcher(Nfs3ProcedureHandlerFactory.CreateDefault(server));
+            Nfs3ProcedureDispatcher dispatcher = new Nfs3ProcedureDispatcher(
+                Nfs3ProcedureHandlerFactory.CreateDefault(server),
+                duplicateRequestCache: null,
+                rpcSecGssAuthenticator: server.Settings.RpcSecGssAuthenticator,
+                rpcSecGssMechanism: server.Settings.RpcSecGssMechanism);
             NsmRecoveryCoordinator recoveryCoordinator = new NsmRecoveryCoordinator();
             NlmV4Service nlmService = new NlmV4Service(server, recoveryCoordinator: recoveryCoordinator);
             NsmService nsmService = new NsmService(recoveryCoordinator);

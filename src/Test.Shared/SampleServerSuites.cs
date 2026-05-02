@@ -10,6 +10,11 @@ namespace Test.Shared
     using System.Text.Json;
     using System.Threading.Tasks;
     using OpenNFS.Client;
+    using OpenNFS.Protocol.V3.Generated;
+    using OpenNFS.Rpc.Generated;
+    using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Security.RpcSecGss;
+    using OpenNFS.Rpc.Transport;
     using OpenNFS.Server;
     using OpenNFS.Server.FileHandles;
     using OpenNFS.Server.Requests;
@@ -240,6 +245,20 @@ namespace Test.Shared
                         displayName: "Sample artifact reports negative lookup and lock-conflict paths through the public client",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
                         executeAsync: ExecuteCapabilitySurfaceReportsNegativeLockAndLookupPathsAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "SampleServerSuites",
+                        caseId: "KerberosMount",
+                        displayName: "Sample artifact registers the Kerberos mechanism and routes RPCSEC_GSS calls through the configured authenticator",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteKerberosMountAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "SampleServerSuites",
+                        caseId: "KerberosMountNotConfigured",
+                        displayName: "Sample artifact rejects RPCSEC_GSS calls with AUTH_TOOWEAK when no Kerberos mechanism is registered",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: ExecuteKerberosMountNotConfiguredAsync),
                 },
                 beforeSuiteAsync: probe.IsAvailable
                     ? cancellationToken => new ValueTask(DockerInteropImages.EnsureBuiltAsync(cancellationToken))
@@ -1288,6 +1307,178 @@ namespace Test.Shared
             });
 
             await File.WriteAllTextAsync(configPath, json, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static async Task ExecuteKerberosMountAsync(System.Threading.CancellationToken cancellationToken)
+        {
+            const string TargetSpn = "nfs/sample.example.test@EXAMPLE.TEST";
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.SampleKrb", Guid.NewGuid().ToString("N"));
+            string sourcePath = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(sourcePath);
+
+                await using SampleOpenNfsServerProcess process = await SampleOpenNfsServerProcess.StartAsync(
+                    sourcePath,
+                    mappingPath,
+                    denyMounts: false,
+                    kerberosTargetSpn: TargetSpn,
+                    kerberosKeytab: null,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!string.Equals(process.KerberosTargetSpn, TargetSpn, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "The sample artifact must report the configured Kerberos SPN on its READY line. Combined output: "
+                        + Environment.NewLine
+                        + process.GetCombinedOutput());
+                }
+
+                auth_stat observedStatus = await SendRpcSecGssDataNullCallAsync(
+                    process.MountPort,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (observedStatus != auth_stat.RPCSEC_GSS_CTXPROBLEM)
+                {
+                    throw new InvalidOperationException(
+                        "When the sample registers a Kerberos mechanism, an RPCSEC_GSS DATA call referencing an unknown context handle must be rejected with RPCSEC_GSS_CTXPROBLEM by the dispatcher's authenticator. Observed: "
+                        + observedStatus
+                        + Environment.NewLine
+                        + process.GetCombinedOutput());
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(rootDirectory);
+            }
+        }
+
+        private static async Task ExecuteKerberosMountNotConfiguredAsync(System.Threading.CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.SampleKrb", Guid.NewGuid().ToString("N"));
+            string sourcePath = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(sourcePath);
+
+                await using SampleOpenNfsServerProcess process = await SampleOpenNfsServerProcess.StartAsync(
+                    sourcePath,
+                    mappingPath,
+                    denyMounts: false,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!string.Equals(process.KerberosTargetSpn, "off", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Without a configured Kerberos SPN the sample artifact must report kerberos=off on its READY line. Observed: "
+                        + process.KerberosTargetSpn);
+                }
+
+                auth_stat observedStatus = await SendRpcSecGssDataNullCallAsync(
+                    process.MountPort,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (observedStatus != auth_stat.AUTH_TOOWEAK)
+                {
+                    throw new InvalidOperationException(
+                        "When no Kerberos mechanism is registered, the dispatcher must reject RPCSEC_GSS calls with AUTH_TOOWEAK. Observed: "
+                        + observedStatus
+                        + Environment.NewLine
+                        + process.GetCombinedOutput());
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(rootDirectory);
+            }
+        }
+
+        private static async Task<auth_stat> SendRpcSecGssDataNullCallAsync(int mountPort, System.Threading.CancellationToken cancellationToken)
+        {
+            byte[] handle = new byte[]
+            {
+                0x4F, 0x70, 0x65, 0x6E, 0x4E, 0x46, 0x53, 0x2E,
+                0x53, 0x61, 0x6D, 0x70, 0x6C, 0x65, 0x4B, 0x52,
+            };
+
+            RpcSecGssCredentialBody credentialBody = new RpcSecGssCredentialBody(
+                version: RpcSecGssProtocolConstants.Version,
+                procedure: RpcSecGssProcedure.Data,
+                sequenceNumber: 1,
+                service: RpcSecGssService.Integrity,
+                contextHandle: handle);
+            opaque_auth credential = RpcSecGssCredentialCodec.Write(credentialBody);
+            opaque_auth verifier = new opaque_auth
+            {
+                flavor = auth_flavor.AUTH_NONE,
+                body = Array.Empty<byte>(),
+            };
+
+            RpcMessageEnvelope call = RpcMessageFactory.CreateCall(
+                xid: 0xC0FEEC0F,
+                program: (uint)MOUNT_PROGRAM_Program.Program,
+                version: (uint)MOUNT_PROGRAM_Program.Version_MOUNT_V3,
+                procedure: (uint)MOUNT_PROGRAM_Program.Procedure_MOUNT_V3_MOUNTPROC3_NULL,
+                credential: credential,
+                verifier: verifier,
+                procedurePayload: ReadOnlyMemory<byte>.Empty);
+
+            using TcpClient tcpClient = new TcpClient();
+            await tcpClient.ConnectAsync(IPAddress.Loopback, mountPort, cancellationToken).ConfigureAwait(false);
+            using NetworkStream stream = tcpClient.GetStream();
+            RpcTcpTransport transport = new RpcTcpTransport(
+                stream,
+                new RpcTransportOptions(timeouts: new RpcTransportTimeouts(
+                    readTimeout: TimeSpan.FromSeconds(15),
+                    writeTimeout: TimeSpan.FromSeconds(15))));
+
+            await transport.SendAsync(call, cancellationToken).ConfigureAwait(false);
+            RpcMessageEnvelope reply = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+
+            rpc_msg_body? body = reply.Header.body;
+            if (body?.mtype != msg_type.REPLY || body.rbody is null)
+            {
+                throw new InvalidOperationException("Expected an RPC reply envelope from the sample MOUNT v3 listener.");
+            }
+
+            reply_body replyBody = body.rbody;
+            if (replyBody.stat != reply_stat.MSG_DENIED || replyBody.rreply is null)
+            {
+                throw new InvalidOperationException(
+                    "Expected the dispatcher to reject the RPCSEC_GSS call with MSG_DENIED. Observed reply_stat: "
+                    + replyBody.stat);
+            }
+
+            rejected_reply rejected = replyBody.rreply;
+            if (rejected.stat != reject_stat.AUTH_ERROR || !rejected.stat_value.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "Expected an AUTH_ERROR rejection carrying an auth_stat value. Observed reject_stat: "
+                    + rejected.stat);
+            }
+
+            return rejected.stat_value.Value;
+        }
+
+        private static void TryDeleteDirectory(string path)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 }

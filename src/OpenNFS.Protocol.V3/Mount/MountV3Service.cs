@@ -9,6 +9,7 @@ namespace OpenNFS.Protocol.V3.Mount
     using OpenNFS.Protocol.V3.Server.Procedures;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Security.RpcSecGss;
     using OpenNFS.Rpc.Xdr;
     using OpenNFS.Server;
     using OpenNFS.Server.Requests;
@@ -65,6 +66,16 @@ namespace OpenNFS.Protocol.V3.Mount
                     status: accept_stat.PROG_MISMATCH,
                     mismatchLowVersion: (uint)MOUNT_PROGRAM_Program.Version_MOUNT_V3,
                     mismatchHighVersion: (uint)MOUNT_PROGRAM_Program.Version_MOUNT_V3);
+            }
+
+            RpcSecGssCallDisposition disposition = await RpcSecGssCallProcessor.ProcessAsync(
+                request,
+                _server.Settings.RpcSecGssAuthenticator,
+                _server.Settings.RpcSecGssMechanism,
+                cancellationToken).ConfigureAwait(false);
+            if (!disposition.ContinueProcessing)
+            {
+                return disposition.Reply!;
             }
 
             switch (callBody.proc)

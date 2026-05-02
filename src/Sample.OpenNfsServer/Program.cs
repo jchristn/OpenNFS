@@ -4,6 +4,7 @@ namespace Sample.OpenNfsServer
     using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
+    using OpenNFS.Rpc.Security.Kerberos;
     using OpenNFS.Server;
     using OpenNFS.Server.FileHandles;
     using Sample.OpenNfsServer.Providers;
@@ -40,6 +41,17 @@ namespace Sample.OpenNfsServer
                     .UseMountAuthorization(configuration.DenyMounts ? SampleMountAuthorization.DenyAll : SampleMountAuthorization.AllowAll)
                     .AddExport(configuration.ExportPath, configuration.SourcePath);
 
+                if (!string.IsNullOrWhiteSpace(configuration.KerberosTargetSpn))
+                {
+                    if (!string.IsNullOrWhiteSpace(configuration.KerberosKeytab))
+                    {
+                        Environment.SetEnvironmentVariable("KRB5_KTNAME", "FILE:" + configuration.KerberosKeytab);
+                    }
+
+                    OpenNfsKerberosMechanismOptions kerberosOptions = new OpenNfsKerberosMechanismOptions(configuration.KerberosTargetSpn);
+                    builder.UseRpcSecGssMechanism(new OpenNfsKerberosMechanism(kerberosOptions));
+                }
+
                 if (configuration.NfsPort > 0)
                 {
                     builder.WithListenerPort(configuration.NfsPort);
@@ -71,7 +83,9 @@ namespace Sample.OpenNfsServer
                     + " nfs40Port="
                     + application.Nfs40Port
                     + " exportPath="
-                    + configuration.ExportPath);
+                    + configuration.ExportPath
+                    + " kerberos="
+                    + (string.IsNullOrWhiteSpace(configuration.KerberosTargetSpn) ? "off" : configuration.KerberosTargetSpn));
                 Console.WriteLine("Export source: " + configuration.SourcePath);
                 Console.WriteLine("Press Ctrl+C to stop.");
 
