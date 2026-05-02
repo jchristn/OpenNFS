@@ -292,10 +292,11 @@ namespace Test.Shared
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
                         executeAsync: async cancellationToken =>
                         {
-                            using UdpClient udpServer = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-                            int port = ((IPEndPoint)udpServer.Client.LocalEndPoint!).Port;
-                            TcpListener tcpFailureListener = new TcpListener(IPAddress.Loopback, port);
-                            tcpFailureListener.Start();
+                            (UdpClient udpServerReserved, TcpListener tcpFailureListenerReserved, int reservedPort) =
+                                LoopbackDualBindReservation.Reserve();
+                            using UdpClient udpServer = udpServerReserved;
+                            TcpListener tcpFailureListener = tcpFailureListenerReserved;
+                            int port = reservedPort;
                             byte[] expectedReplyPayload = new byte[] { 0x01, 0x02, 0x03, 0x04 };
 
                             Task serverTask = Task.Run(
