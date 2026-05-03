@@ -20,13 +20,30 @@ else {
 }
 
 $requiredCases = @(
+    # Linux kernel client → OpenNFS server (NFSv3 mount/read/write).
     "InteropSuites.LinuxKernelClientMountsOpenNfsServer",
+    # Linux kernel client → packaged sample artifact.
     "InteropSuites.LinuxKernelClientMountsSampleOpenNfsServerArtifact",
+    # OpenNFS client → Linux kernel knfsd over NFSv3.
     "InteropSuites.OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServer",
+    # OpenNFS client → Linux kernel knfsd over NFSv4.0.
     "InteropSuites.OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServerOverNfs40",
+    # Reboot-like recovery: post-disconnect replay, NLM grace reclaim, NFSv4.0
+    # lease-expiry recovery, and NFSv4.1 cached-reply replay across a fresh TCP.
     "ReplaySuites.DisconnectReplayRecovery",
     "NlmSuites.ReclaimAfterServerRestartPositive",
-    "NfsV40Suites.ReclaimAfterLeaseRecovery"
+    "NfsV40Suites.ReclaimAfterLeaseRecovery",
+    "NfsV41Suites.SessionReplayAfterReconnect",
+    # Kerberos-sensitive scenarios. These run against the live MIT KDC fixture
+    # under scripts/interop/kerberos/. They cover krb5 (auth-only), krb5i
+    # (integrity), krb5p (privacy), context establishment, integrity-failure
+    # rejection, and the server's mechanism wiring.
+    "SecuritySuites.Krb5ReadWrite",
+    "SecuritySuites.Krb5iDetectsTamper",
+    "SecuritySuites.Krb5pEncryptsPayload",
+    "SecuritySuites.RpcSecGssContextEstablishment",
+    "SecuritySuites.RpcSecGssIntegrityFailureRejected",
+    "SecuritySuites.ServerBuilderRegistersRpcSecGssMechanism"
 )
 
 $command = "dotnet run --project src/Test.Automated/Test.Automated.csproj -c Release --no-build --framework net8.0 -- --results $TouchstoneResultsPath"

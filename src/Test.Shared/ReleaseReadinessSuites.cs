@@ -473,6 +473,13 @@ namespace Test.Shared
                     CreateSyntheticTouchstoneResult("ReplaySuites", "DisconnectReplayRecovery"),
                     CreateSyntheticTouchstoneResult("NlmSuites", "ReclaimAfterServerRestartPositive"),
                     CreateSyntheticTouchstoneResult("NfsV40Suites", "ReclaimAfterLeaseRecovery"),
+                    CreateSyntheticTouchstoneResult("NfsV41Suites", "SessionReplayAfterReconnect"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "Krb5ReadWrite"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "Krb5iDetectsTamper"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "Krb5pEncryptsPayload"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "RpcSecGssContextEstablishment"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "RpcSecGssIntegrityFailureRejected"),
+                    CreateSyntheticTouchstoneResult("SecuritySuites", "ServerBuilderRegistersRpcSecGssMechanism"),
                 };
 
                 await File.WriteAllTextAsync(
@@ -509,9 +516,9 @@ namespace Test.Shared
                 using JsonDocument manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
                 JsonElement root = manifest.RootElement;
                 if (!root.TryGetProperty("requiredCases", out JsonElement requiredCases)
-                    || requiredCases.GetArrayLength() != 7
+                    || requiredCases.GetArrayLength() != 14
                     || !root.TryGetProperty("validatedCases", out JsonElement validatedCases)
-                    || validatedCases.GetArrayLength() != 7)
+                    || validatedCases.GetArrayLength() != 14)
                 {
                     throw new InvalidOperationException("Expected the privileged interop manifest to record every required validated case.");
                 }

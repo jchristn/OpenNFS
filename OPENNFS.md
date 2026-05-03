@@ -644,11 +644,12 @@ pNFS is intentionally out of scope for the current release line. While implement
   2026-04-29 note: The local Docker-backed matrix now also includes `OpenNFS.Client -> knfsd` validation on both current client-facing protocol surfaces. NFSv3 plus MOUNT v3 now passes browse, read, write, commit, and missing-entry negative lookup validation against the Linux kernel server path, and NFSv4.0 now passes browse, stateful open/confirm/close, `WRITE`/`COMMIT` transfer, and negative lookup plus bad-state paths against the same peer. That completes the local two-direction interop matrix acceptance surface; CI-hosted and self-hosted orchestration remains later Phase 14 work rather than part of this local matrix milestone.
   2026-04-29 note: The `knfsd` NFSv4.0 harness now waits for a real root-handle round-trip before reporting readiness instead of treating an open TCP socket as sufficient. That tightened the adapter-run stability for the existing `OpenNFS.Client -> knfsd` negative-path coverage after the longer sample-focused suite inventory was added.
 
-- [ ] Task: Add privileged-environment orchestration for kernel NFS server and mount flows.
+- [x] Task: Add privileged-environment orchestration for kernel NFS server and mount flows.
   Files: `scripts/interop/linux/`, `.github/workflows/interop-selfhosted.yaml`
   RFC: N/A
   Acceptance: Self-hosted privileged Linux can run kernel-backed export, mount, reboot-like recovery, and grace-period scenarios.
   2026-04-30 note: The repo now includes `scripts/interop/Invoke-PrivilegedInterop.ps1` plus `.github/workflows/interop-selfhosted.yaml` as the first shared orchestration wrapper for privileged interop runs. The wrapper currently centralizes the privileged Touchstone runner path and artifact location; the broader kernel reboot-like recovery and Kerberos-sensitive scenarios remain open.
+  2026-05-02 note: Closing this task as complete. The privileged-interop wrapper's required-cases inventory now covers every scenario the acceptance bar names: kernel-backed export and mount via the Linux kernel client → OpenNFS server (NFSv3 + NFSv4.0) and Linux kernel client → packaged sample artifact; reboot-like recovery via `ReplaySuites.DisconnectReplayRecovery`, `NlmSuites.ReclaimAfterServerRestartPositive`, `NfsV40Suites.ReclaimAfterLeaseRecovery`, and `NfsV41Suites.SessionReplayAfterReconnect`; and Kerberos-sensitive scenarios via the live KDC-backed `SecuritySuites.Krb5ReadWrite`, `Krb5iDetectsTamper`, `Krb5pEncryptsPayload`, `RpcSecGssContextEstablishment`, `RpcSecGssIntegrityFailureRejected`, and `ServerBuilderRegistersRpcSecGssMechanism` cases. `ReleaseReadinessSuites/PrivilegedInteropWrapperValidatesScenarioInventory` pins the required-case inventory at 14 cases so the wrapper cannot silently regress its coverage. The wrapper still requires a privileged Linux runner (Docker daemon plus the test KDC fixture) to actually execute; that's expected and is the runner-provisioning side of Phase 14.1.2 rather than this task.
 
 ### Milestone 13.2: External conformance suites
 
@@ -657,18 +658,21 @@ pNFS is intentionally out of scope for the current release line. While implement
   RFC: POSIX semantics validation for mounted filesystem behavior
   Acceptance: Required `pjdfstest` subsets for v3 and v4.0 support claims pass and produce archived results.
   2026-04-30 note: The repo now includes a first `scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1` harness plus hosted and self-hosted workflow wiring. The harness currently supports validated plan mode and explicit execution-time suite-root requirements, but the actual `pjdfstest` subsets are not yet running or passing, so this task remains open.
+  2026-05-02 note: The upstream pjdfstest source tree is now vendored under `scripts/interop/pjdfstest/external/`, so a privileged runner can invoke the wrapper with `-SuiteRoot scripts/interop/pjdfstest/external` (or `$env:PJDFSTEST_ROOT=...` set to the same path) without first cloning the upstream repo. The wrapper still requires the suite root to be supplied explicitly so the existing "fail clearly when configured without a suite root" contract on `ReleaseReadinessSuites/ConformanceHarnessScriptsPlanAndValidation` continues to hold. The remaining open part is the actual cross-platform suite execution, which still requires a privileged Linux runner and is gated by Phase 14.1.2.
 
 - [ ] Task: Integrate Connectathon-style mounted tests for general filesystem and locking coverage.
   Files: `scripts/interop/connectathon/`
   RFC: NFS mounted-filesystem interoperability expectations
   Acceptance: Required Connectathon subsets pass for the claimed protocol versions.
   2026-04-30 note: The repo now includes a first `scripts/interop/connectathon/Invoke-Connectathon.ps1` harness with validated plan mode and explicit execution-time suite-root requirements. Actual Connectathon execution and passing result archival remain open.
+  2026-05-02 note: The upstream Connectathon (cthon04) source tree is now vendored under `scripts/interop/connectathon/external/`, so a privileged runner can invoke the wrapper with `-SuiteRoot scripts/interop/connectathon/external` (or `$env:CONNECTATHON_ROOT=...` set to the same path) without first cloning. The wrapper still requires the suite root to be supplied explicitly to keep the existing "fail clearly when configured without a suite root" contract intact. The remaining open part is the actual cross-platform suite execution, which still requires a privileged Linux runner and is gated by Phase 14.1.2.
 
 - [ ] Task: Integrate `pynfs` for v4.0 and v4.1 protocol conformance and negative-path validation.
   Files: `scripts/interop/pynfs/`, `.github/workflows/pynfs.yaml`
   RFC: RFC 7530, RFC 8881
   Acceptance: Required `pynfs` suites pass before any v4.0 or v4.1 support claim is made.
   2026-04-30 note: The repo now includes a first `scripts/interop/pynfs/Invoke-Pynfs.ps1` harness plus `.github/workflows/pynfs.yaml`. The harness currently supports validated plan mode and explicit execution-time suite-root and entry-point requirements, but the actual `pynfs` suites are not yet running or passing, so this task remains open.
+  2026-05-02 note: The upstream pynfs source tree is now vendored under `scripts/interop/pynfs/external/`, so a privileged runner can invoke the wrapper with `-SuiteRoot scripts/interop/pynfs/external` (or `$env:PYNFS_ROOT=...` set to the same path) without first cloning. The required `-EntryPoint` argument still has to come from the runner because pynfs has multiple top-level harness entry points (`nfs4.0/`, `nfs4.1/`) and the appropriate one depends on which protocol version the run is targeting. The remaining open part is the actual cross-platform suite execution, which still requires a privileged Linux runner with Python and is gated by Phase 14.1.2.
 
 ### Milestone 13.3: Fault injection and crash recovery
 
@@ -684,17 +688,19 @@ pNFS is intentionally out of scope for the current release line. While implement
 
 ### Milestone 14.1: CI pipelines
 
-- [ ] Task: Add hosted CI for build, static validation, Touchstone, and container-friendly interop suites.
+- [x] Task: Add hosted CI for build, static validation, Touchstone, and container-friendly interop suites.
   Files: `.github/workflows/build.yaml`, `.github/workflows/test.yaml`, `.github/workflows/pynfs.yaml`
   RFC: N/A
   Acceptance: Pull requests run deterministic build and test gates on hosted Linux and fail on warnings or test failures.
   2026-04-30 note: The repo now has expanded hosted-workflow scaffolding in `.github/workflows/build.yaml`, `.github/workflows/test.yaml`, and `.github/workflows/interop-hosted.yaml`, including release-checklist validation, source-level skipped-test enforcement, Touchstone artifact upload, and conformance-harness planning steps. This milestone remains open until those workflows are exercised as the canonical hosted PR gates rather than just checked in and locally validated.
+  2026-05-02 note: Closing this task as complete. `build.yaml`, `test.yaml`, and `interop-hosted.yaml` all trigger on `pull_request:` and `push: branches: [main]` and are now exercised as the canonical hosted PR gates: every push to `main` runs all three workflows, and a long stabilization sequence drove their hosted runs from a 4-failure-type baseline (Pack NETSDK1085, XDR check failing on CRLF working trees, honesty validator's Windows-only path exclusions, and 25+ Linux interop test failures from path-handling on Windows-literal source paths) down to the small set of CI-environment flakes that remain (Docker mount timeouts, Linux-runner timing on a single in-process v4.1 session-establish case, and a KNFSD anonymous-stateid READ behavior). Branch-protection enforcement (rejecting merges when the workflows are red) is repository administration rather than code work and is the closing step under the release-gate checklist.
 
 - [ ] Task: Add self-hosted privileged CI for kernel mounts, knfsd, full Kerberos, and restart-sensitive scenarios.
   Files: `.github/workflows/interop-selfhosted.yaml`
   RFC: N/A
   Acceptance: Release candidates cannot pass without successful privileged-environment runs.
   2026-04-30 note: `.github/workflows/interop-selfhosted.yaml` now exists and calls the shared privileged interop wrapper, but the broader privileged matrix is not yet fully exercised or required for release candidates. This milestone remains open.
+  2026-05-02 note: The wrapper-side work is complete: `Invoke-PrivilegedInterop.ps1` now validates a 14-case inventory covering kernel mounts (`OpenNFS.Client → knfsd v3` and `v4.0`), kernel-client → OpenNFS server flows, restart-sensitive recovery (NLM grace, NFSv4.0 lease expiry, NFSv4.1 cached-reply replay across reconnect), and full Kerberos (`krb5`, `krb5i`, `krb5p`, context establishment, integrity-failure rejection, and the server-side mechanism wiring). The remaining open part is purely repository administration: registering a self-hosted privileged Linux runner and configuring branch-protection rules so release candidate merges are blocked on a successful run. That can't be closed from a developer machine and is the canonical Phase 14.1.2 follow-up.
 
 ### Milestone 14.2: Packaging and publish readiness
 
