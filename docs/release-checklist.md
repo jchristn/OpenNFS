@@ -28,6 +28,7 @@ Use this checklist before any branch claims that a protocol version or security 
 - Linux mount and transfer validation against the public packaged server path passes.
 - Required `pjdfstest` subsets for the claimed NFSv3 surface pass.
 - Required Connectathon subsets for mounted filesystem semantics and v3 locking pass.
+- `pwsh ./scripts/release/Assert-ConformanceArtifacts.ps1 -ResultsDirectory artifacts` passes against fresh, non-synthetic conformance manifests.
 - The current `knfsd` and userspace Linux peer matrix continues to pass browse, transfer, and negative-path coverage.
 
 ## NFSv4.0 support gates

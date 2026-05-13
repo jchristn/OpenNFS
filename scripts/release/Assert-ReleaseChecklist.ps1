@@ -21,6 +21,7 @@ $requiredTokens = @(
     "Test.Xunit",
     "Test.Nunit",
     "Assert-RepositoryHonesty.ps1",
+    "Assert-ConformanceArtifacts.ps1",
     "pjdfstest",
     "Connectathon",
     "pynfs",

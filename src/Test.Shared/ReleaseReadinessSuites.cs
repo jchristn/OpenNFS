@@ -201,6 +201,7 @@ namespace Test.Shared
                                 || !ContainsEither(result, "Generate-Xdr.ps1 -Check", "Test.Automated")
                                 || !ContainsEither(result, "Assert-NoSkippedTests.ps1", "release-checklist.md")
                                 || !ContainsEither(result, "Assert-RepositoryHonesty.ps1", "honesty")
+                                || !ContainsEither(result, "Assert-ConformanceArtifacts.ps1", "conformance")
                                 || !ContainsEither(result, "pjdfstest", "Connectathon")
                                 || !ContainsEither(result, "pynfs", "OpenNFS.Server"))
                             {
@@ -212,6 +213,13 @@ namespace Test.Shared
                                     + result.StandardError);
                             }
                         }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ReleaseReadinessSuites",
+                        caseId: "ConformanceArtifactValidatorPositiveAndNegative",
+                        displayName: "Conformance artifact validator accepts fresh real-suite manifests and rejects missing artifacts",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: ExecuteConformanceArtifactValidatorPositiveAndNegativeAsync),
 
                     new TestCaseDescriptor(
                         suiteId: "ReleaseReadinessSuites",
@@ -403,6 +411,83 @@ namespace Test.Shared
                         skipReason: probe.SkipReason,
                         executeAsync: ExecutePackedClientPackageSurfacesNegativeResultsAgainstPeerMatrixAsync),
                 });
+        }
+
+        private static async Task ExecuteConformanceArtifactValidatorPositiveAndNegativeAsync(CancellationToken cancellationToken)
+        {
+            string tempRoot = CreateTempDirectory("ConformanceArtifactValidator");
+            string artifactsRoot = Path.Combine(tempRoot, "artifacts");
+
+            try
+            {
+                await WriteConformanceManifestAsync(
+                    Path.Combine(artifactsRoot, "pjdfstest", "pjdfstest-manifest.json"),
+                    "pjdfstest",
+                    cancellationToken).ConfigureAwait(false);
+                await WriteConformanceManifestAsync(
+                    Path.Combine(artifactsRoot, "connectathon", "connectathon-manifest.json"),
+                    "connectathon",
+                    cancellationToken).ConfigureAwait(false);
+                await WriteConformanceManifestAsync(
+                    Path.Combine(artifactsRoot, "pynfs", "pynfs-manifest.json"),
+                    "pynfs",
+                    cancellationToken).ConfigureAwait(false);
+
+                PowerShellCommandResult positiveResult = await RunScriptAsync(
+                    @"scripts\release\Assert-ConformanceArtifacts.ps1",
+                    new[] { "-RepositoryRoot", tempRoot, "-ResultsDirectory", artifactsRoot },
+                    cancellationToken).ConfigureAwait(false);
+                if (positiveResult.ExitCode != 0
+                    || !ContainsEither(positiveResult, "Conformance artifact validation passed", artifactsRoot))
+                {
+                    throw new InvalidOperationException(
+                        "Expected conformance artifact validation to accept fresh non-synthetic manifests."
+                        + Environment.NewLine
+                        + positiveResult.StandardOutput
+                        + Environment.NewLine
+                        + positiveResult.StandardError);
+                }
+
+                File.Delete(Path.Combine(artifactsRoot, "pynfs", "pynfs-manifest.json"));
+                PowerShellCommandResult negativeResult = await RunScriptAsync(
+                    @"scripts\release\Assert-ConformanceArtifacts.ps1",
+                    new[] { "-RepositoryRoot", tempRoot, "-ResultsDirectory", artifactsRoot },
+                    cancellationToken).ConfigureAwait(false);
+                if (negativeResult.ExitCode == 0
+                    || !ContainsEither(negativeResult, "Required conformance artifact", "pynfs"))
+                {
+                    throw new InvalidOperationException(
+                        "Expected conformance artifact validation to reject a missing pynfs manifest."
+                        + Environment.NewLine
+                        + negativeResult.StandardOutput
+                        + Environment.NewLine
+                        + negativeResult.StandardError);
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(tempRoot);
+            }
+        }
+
+        private static async Task WriteConformanceManifestAsync(
+            string manifestPath,
+            string suite,
+            CancellationToken cancellationToken)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+            var manifest = new
+            {
+                suite,
+                suiteRoot = Path.Combine(Path.GetTempPath(), "real-" + suite),
+                exitCode = 0,
+                validatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+            };
+
+            await File.WriteAllTextAsync(
+                manifestPath,
+                JsonSerializer.Serialize(manifest),
+                cancellationToken).ConfigureAwait(false);
         }
 
         private static async Task ExecuteRepositoryHonestyValidatorNegativeAsync(CancellationToken cancellationToken)

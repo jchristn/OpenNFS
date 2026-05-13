@@ -19,6 +19,7 @@ if (-not (Test-Path $RepositoryRoot -PathType Container)) {
 $releaseChecklistPath = Join-Path $RepositoryRoot "docs\\release-checklist.md"
 $skipScriptPath = Join-Path $PSScriptRoot "Assert-NoSkippedTests.ps1"
 $checklistScriptPath = Join-Path $PSScriptRoot "Assert-ReleaseChecklist.ps1"
+$conformanceArtifactsScriptPath = Join-Path $PSScriptRoot "Assert-ConformanceArtifacts.ps1"
 $honestyScriptPath = Join-Path $PSScriptRoot "Assert-RepositoryHonesty.ps1"
 $generateXdrScriptPath = Join-Path $RepositoryRoot "scripts\\Generate-Xdr.ps1"
 
@@ -34,7 +35,8 @@ $requiredHarnessPaths = @(
     "scripts/interop/Invoke-PrivilegedInterop.ps1",
     "scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1",
     "scripts/interop/connectathon/Invoke-Connectathon.ps1",
-    "scripts/interop/pynfs/Invoke-Pynfs.ps1"
+    "scripts/interop/pynfs/Invoke-Pynfs.ps1",
+    "scripts/release/Assert-ConformanceArtifacts.ps1"
 )
 
 foreach ($relativePath in $requiredWorkflowPaths + $requiredHarnessPaths) {
@@ -52,6 +54,7 @@ $localCommands = @(
     "dotnet build src/OpenNFS.sln -c Release -m:1",
     "PowerShell ./scripts/Generate-Xdr.ps1 -Check",
     "PowerShell ./scripts/release/Assert-RepositoryHonesty.ps1",
+    "PowerShell ./scripts/release/Assert-ConformanceArtifacts.ps1 -ResultsDirectory artifacts",
     "dotnet run --project src/Test.Automated/Test.Automated.csproj -c Release --no-build --framework net8.0 -- --results artifacts/touchstone-results.json",
     "dotnet test src/Test.Xunit/Test.Xunit.csproj -c Release --no-build",
     "dotnet test src/Test.Nunit/Test.Nunit.csproj -c Release --no-build"
@@ -85,6 +88,8 @@ if ($PlanOnly) {
 
     return
 }
+
+& $conformanceArtifactsScriptPath -RepositoryRoot $RepositoryRoot -ResultsDirectory "artifacts"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $RepositoryRoot $ResultsDirectory) | Out-Null
 
