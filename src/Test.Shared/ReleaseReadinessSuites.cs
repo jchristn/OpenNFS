@@ -560,6 +560,7 @@ namespace Test.Shared
                 object[] positiveResults =
                 {
                     CreateSyntheticTouchstoneResult("InteropSuites", "LinuxKernelClientMountsOpenNfsServer"),
+                    CreateSyntheticTouchstoneResult("InteropSuites", "LinuxKernelClientMountsOpenNfsServerOverNfs40"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "LinuxKernelClientMountsSampleOpenNfsServerArtifact"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServer"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "OpenNfsClientSurfacesNegativeResultsAgainstLinuxKnfsdServer"),
@@ -610,9 +611,9 @@ namespace Test.Shared
                 using JsonDocument manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
                 JsonElement root = manifest.RootElement;
                 if (!root.TryGetProperty("requiredCases", out JsonElement requiredCases)
-                    || requiredCases.GetArrayLength() != 15
+                    || requiredCases.GetArrayLength() != 16
                     || !root.TryGetProperty("validatedCases", out JsonElement validatedCases)
-                    || validatedCases.GetArrayLength() != 15)
+                    || validatedCases.GetArrayLength() != 16)
                 {
                     throw new InvalidOperationException("Expected the privileged interop manifest to record every required validated case.");
                 }

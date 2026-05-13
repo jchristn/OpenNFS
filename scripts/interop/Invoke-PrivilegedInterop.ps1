@@ -22,6 +22,7 @@ else {
 $requiredCases = @(
     # Linux kernel client → OpenNFS server (NFSv3 mount/read/write).
     "InteropSuites.LinuxKernelClientMountsOpenNfsServer",
+    "InteropSuites.LinuxKernelClientMountsOpenNfsServerOverNfs40",
     # Linux kernel client → packaged sample artifact.
     "InteropSuites.LinuxKernelClientMountsSampleOpenNfsServerArtifact",
     # OpenNFS client → Linux kernel knfsd over NFSv3.

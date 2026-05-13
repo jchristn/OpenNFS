@@ -173,6 +173,15 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "InteropSuites",
+                        caseId: "LinuxKernelClientMountsOpenNfsServerOverNfs40",
+                        displayName: "A real Linux kernel NFSv4.0 client mounts, reads, writes, and deletes through an OpenNFS server host",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },
+                        skip: !probe.IsAvailable,
+                        skipReason: probe.SkipReason,
+                        executeAsync: ExecuteLinuxClientAgainstOpenNfsServerOverNfs40Async),
+
+                    new TestCaseDescriptor(
+                        suiteId: "InteropSuites",
                         caseId: "LinuxKernelClientSeesDeniedMountFromOpenNfsServer",
                         displayName: "A real Linux kernel NFS client receives a failed mount when OpenNFS.Server denies access",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },
@@ -2146,6 +2155,50 @@ namespace Test.Shared
             }
         }
 
+        private static async Task ExecuteLinuxClientAgainstOpenNfsServerOverNfs40Async(CancellationToken cancellationToken)
+        {
+            OpenNfsServer server = await CreateOpenNfsV40InteropServerAsync(
+                cancellationToken,
+                includeAcls: false,
+                includeDelegations: false).ConfigureAwait(false);
+
+            await using OpenNfsTcpNfs40ServerHost host = OpenNfsTcpNfs40ServerHost.Start(
+                server,
+                listenerAddress: "0.0.0.0",
+                nfsPort: 0);
+
+            DockerCommandResult result = await DockerLinuxNfsClient.RunCommandAsync(
+                CreateLinuxV40ReadWriteDeleteMountCommand(host.NfsPort),
+                cancellationToken).ConfigureAwait(false);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    "The Linux kernel NFSv4.0 client container failed to mount or mutate the OpenNFS server."
+                    + Environment.NewLine
+                    + "stdout:"
+                    + Environment.NewLine
+                    + result.StandardOutput
+                    + Environment.NewLine
+                    + "stderr:"
+                    + Environment.NewLine
+                    + result.StandardError);
+            }
+
+            string combinedOutput = (result.StandardOutput + Environment.NewLine + result.StandardError).Trim();
+            if (!combinedOutput.Contains("hello-from-v40", StringComparison.Ordinal)
+                || !combinedOutput.Contains("created-from-linux-v40-client", StringComparison.Ordinal)
+                || !combinedOutput.Contains("delete-v40-verified", StringComparison.Ordinal)
+                || !combinedOutput.Contains("docs", StringComparison.Ordinal)
+                || !combinedOutput.Contains("hello.txt", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Expected the Linux kernel NFSv4.0 client container to surface and mutate the mounted OpenNFS export. Output was:"
+                    + Environment.NewLine
+                    + combinedOutput);
+            }
+        }
+
         private static async Task ExecuteLinuxClientAgainstSampleOpenNfsServerAsync(CancellationToken cancellationToken)
         {
             string sourceDirectory = CreateTempDirectory();
@@ -2468,6 +2521,25 @@ namespace Test.Shared
                 ",nolock,soft,timeo=10,retrans=1 host.docker.internal:", exportPath, " /mnt/opennfs; ",
                 "cat /mnt/opennfs/", primaryFilePath, "; ",
                 "cat /mnt/opennfs/", nestedFilePath, "; ",
+                "ls -1 /mnt/opennfs; ",
+                "umount /mnt/opennfs");
+        }
+
+        private static string CreateLinuxV40ReadWriteDeleteMountCommand(int nfs40Port)
+        {
+            return string.Concat(
+                "set -eu; ",
+                "mkdir -p /mnt/opennfs; ",
+                "mount -t nfs4 -o vers=4.0,minorversion=0,port=", nfs40Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ",soft,timeo=10,retrans=1 host.docker.internal:/ /mnt/opennfs; ",
+                "cat /mnt/opennfs/hello.txt; ",
+                "printf 'created-from-linux-v40-client' > /mnt/opennfs/linux-v40-created.txt; ",
+                "sync; ",
+                "cat /mnt/opennfs/linux-v40-created.txt; ",
+                "rm /mnt/opennfs/linux-v40-created.txt; ",
+                "sync; ",
+                "if [ -e /mnt/opennfs/linux-v40-created.txt ]; then exit 1; fi; ",
+                "echo delete-v40-verified; ",
                 "ls -1 /mnt/opennfs; ",
                 "umount /mnt/opennfs");
         }
