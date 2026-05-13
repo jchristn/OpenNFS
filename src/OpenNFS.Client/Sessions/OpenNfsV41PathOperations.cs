@@ -229,6 +229,122 @@ namespace OpenNFS.Client.Sessions
         }
 
         /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + parent <c>LOOKUP</c>-walk + <c>OPEN</c> COMPOUND-op sequence
+        /// for opening an existing file.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="clientId">The NFSv4.1 client id assigned by the server.</param>
+        /// <param name="owner">The caller-stable open-owner identifier.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <param name="shareAccess">The OPEN4_SHARE_ACCESS_* value.</param>
+        /// <param name="shareDeny">The OPEN4_SHARE_DENY_* value.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is empty, names
+        /// only the export root, contains '..' segments, or when <paramref name="owner"/> is empty.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildOpenExistingOps(
+            string path,
+            ulong clientId,
+            string owner,
+            uint sequenceId,
+            uint shareAccess,
+            uint shareDeny)
+        {
+            List<nfs_argop4> ops = BuildParentPathPrefixOps(path, out byte[] finalComponent);
+            ops.Add(BuildOpenOp(
+                finalComponent,
+                clientId,
+                owner,
+                sequenceId,
+                shareAccess,
+                shareDeny,
+                new openflag4 { opentype = opentype4.OPEN4_NOCREATE }));
+
+            return ops;
+        }
+
+        /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + parent <c>LOOKUP</c>-walk + create <c>OPEN</c> COMPOUND-op
+        /// sequence for creating and opening a file.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="clientId">The NFSv4.1 client id assigned by the server.</param>
+        /// <param name="owner">The caller-stable open-owner identifier.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <param name="shareAccess">The OPEN4_SHARE_ACCESS_* value.</param>
+        /// <param name="shareDeny">The OPEN4_SHARE_DENY_* value.</param>
+        /// <param name="createMode">The create mode. Only <c>UNCHECKED4</c> and <c>GUARDED4</c>
+        /// are supported by this convenience builder because exclusive create modes require verifier
+        /// payloads.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is empty, names
+        /// only the export root, contains '..' segments, when <paramref name="owner"/> is empty, or
+        /// when <paramref name="createMode"/> requires an explicit verifier.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildCreateAndOpenOps(
+            string path,
+            ulong clientId,
+            string owner,
+            uint sequenceId,
+            uint shareAccess,
+            uint shareDeny,
+            createmode4 createMode = createmode4.GUARDED4)
+        {
+            if (createMode != createmode4.UNCHECKED4 && createMode != createmode4.GUARDED4)
+            {
+                throw new ArgumentException(
+                    "BuildCreateAndOpenOps only supports UNCHECKED4 and GUARDED4 create modes.",
+                    nameof(createMode));
+            }
+
+            List<nfs_argop4> ops = BuildParentPathPrefixOps(path, out byte[] finalComponent);
+            ops.Add(BuildOpenOp(
+                finalComponent,
+                clientId,
+                owner,
+                sequenceId,
+                shareAccess,
+                shareDeny,
+                new openflag4
+                {
+                    opentype = opentype4.OPEN4_CREATE,
+                    how = new createhow4
+                    {
+                        mode = createMode,
+                        createattrs = BuildEmptyAttributes(),
+                    },
+                }));
+
+            return ops;
+        }
+
+        /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>CLOSE</c> COMPOUND-op sequence for the
+        /// supplied path and open stateid.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="stateid">The open state id to close.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="stateid"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> contains '..' segments.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildCloseOps(string path, stateid4 stateid, uint sequenceId)
+        {
+            ArgumentNullException.ThrowIfNull(stateid);
+
+            List<nfs_argop4> ops = BuildPathPrefixOps(path ?? string.Empty);
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_CLOSE,
+                opclose = new CLOSE4args
+                {
+                    seqid = new seqid4 { Value = sequenceId },
+                    open_stateid = stateid,
+                },
+            });
+
+            return ops;
+        }
+
+        /// <summary>
         /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>READDIR</c> COMPOUND-op sequence for
         /// listing the directory at the supplied path. The result is intended to be passed to
         /// <see cref="OpenNfsV41ClientSession.SendCompoundAsync"/>.
@@ -349,6 +465,81 @@ namespace OpenNFS.Client.Sessions
             }
 
             return ops;
+        }
+
+        private static List<nfs_argop4> BuildParentPathPrefixOps(string path, out byte[] finalComponent)
+        {
+            IReadOnlyList<byte[]> components = SplitPathComponents(path ?? string.Empty);
+            if (components.Count == 0)
+            {
+                throw new ArgumentException(
+                    "NFSv4.1 OPEN requires a named file path under the export root.",
+                    nameof(path));
+            }
+
+            finalComponent = components[components.Count - 1];
+            return BuildPathPrefixOps(JoinPathComponents(components, components.Count - 1));
+        }
+
+        private static nfs_argop4 BuildOpenOp(
+            byte[] finalComponent,
+            ulong clientId,
+            string owner,
+            uint sequenceId,
+            uint shareAccess,
+            uint shareDeny,
+            openflag4 openHow)
+        {
+            ArgumentNullException.ThrowIfNull(owner);
+            if (owner.Length == 0)
+            {
+                throw new ArgumentException("The NFSv4.1 open owner identifier must not be empty.", nameof(owner));
+            }
+
+            return new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_OPEN,
+                opopen = new OPEN4args
+                {
+                    seqid = new seqid4 { Value = sequenceId },
+                    share_access = shareAccess,
+                    share_deny = shareDeny,
+                    owner = new open_owner4
+                    {
+                        Value = new state_owner4
+                        {
+                            clientid = new clientid4 { Value = clientId },
+                            owner = Encoding.UTF8.GetBytes(owner),
+                        },
+                    },
+                    openhow = openHow,
+                    claim = new open_claim4
+                    {
+                        claim = open_claim_type4.CLAIM_NULL,
+                        file = BuildComponent(finalComponent),
+                    },
+                },
+            };
+        }
+
+        private static fattr4 BuildEmptyAttributes()
+        {
+            return new fattr4
+            {
+                attrmask = new bitmap4 { Value = Array.Empty<uint>() },
+                attr_vals = new attrlist4 { Value = Array.Empty<byte>() },
+            };
+        }
+
+        private static component4 BuildComponent(byte[] value)
+        {
+            return new component4
+            {
+                Value = new utf8str_cs
+                {
+                    Value = new utf8string { Value = value },
+                },
+            };
         }
 
         private static string JoinPathComponents(IReadOnlyList<byte[]> components, int count)

@@ -675,6 +675,9 @@ namespace Test.Shared
                             EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Files));
                             EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Directories));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionMetadata), nameof(OpenNfsV41MountSessionMetadata.GetAttributesAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.OpenExistingAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.CreateAndOpenAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.CloseAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.ReadAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.WriteAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionDirectories), nameof(OpenNfsV41MountSessionDirectories.ListAsync));
@@ -686,6 +689,9 @@ namespace Test.Shared
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildGetAttributesOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReadOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildWriteOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildOpenExistingOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildCreateAndOpenOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildCloseOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReaddirOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildRemoveOps));
 
@@ -1859,6 +1865,153 @@ namespace Test.Shared
                                 || rootOps[1].argop != nfs_opnum4.OP_READDIR)
                             {
                                 throw new InvalidOperationException("Empty path with BuildReaddirOps must produce exactly PUTROOTFH + READDIR.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsOpenCompounds",
+                        displayName: "OpenNfsV41PathOperations builds parent LOOKUP-walk + OPEN COMPOUND op sequences for existing and created files",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            IReadOnlyList<nfs_argop4> existingOps = OpenNfsV41PathOperations.BuildOpenExistingOps(
+                                "/data/file.bin",
+                                clientId: 1234,
+                                owner: "owner-a",
+                                sequenceId: 11,
+                                shareAccess: (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_BOTH,
+                                shareDeny: (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE);
+
+                            if (existingOps.Count != 3
+                                || existingOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || existingOps[1].argop != nfs_opnum4.OP_LOOKUP
+                                || existingOps[2].argop != nfs_opnum4.OP_OPEN)
+                            {
+                                throw new InvalidOperationException("BuildOpenExistingOps must produce PUTROOTFH + parent LOOKUP + OPEN for /data/file.bin.");
+                            }
+
+                            OPEN4args? existingOpen = existingOps[2].opopen;
+                            state_owner4? existingOwner = existingOpen?.owner?.Value;
+                            openflag4? existingOpenHow = existingOpen?.openhow;
+                            byte[]? existingFile = existingOpen?.claim?.file?.Value?.Value?.Value;
+                            if (existingOpen?.seqid?.Value != 11
+                                || existingOpen.share_access != (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_BOTH
+                                || existingOpen.share_deny != (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE
+                                || existingOwner?.clientid?.Value != 1234
+                                || existingOwner?.owner is not byte[] ownerBytes
+                                || System.Text.Encoding.UTF8.GetString(ownerBytes) != "owner-a"
+                                || existingOpenHow?.opentype != opentype4.OPEN4_NOCREATE
+                                || existingOpen.claim?.claim != open_claim_type4.CLAIM_NULL
+                                || existingFile is null
+                                || System.Text.Encoding.UTF8.GetString(existingFile) != "file.bin")
+                            {
+                                throw new InvalidOperationException("OPEN existing args must carry the requested owner, share mode, no-create mode, and final file claim.");
+                            }
+
+                            IReadOnlyList<nfs_argop4> createOps = OpenNfsV41PathOperations.BuildCreateAndOpenOps(
+                                "leaf.txt",
+                                clientId: 5678,
+                                owner: "owner-b",
+                                sequenceId: 12,
+                                shareAccess: (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_WRITE,
+                                shareDeny: (uint)Nfs41Constants.OPEN4_SHARE_DENY_READ,
+                                createMode: createmode4.UNCHECKED4);
+
+                            if (createOps.Count != 2
+                                || createOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || createOps[1].argop != nfs_opnum4.OP_OPEN)
+                            {
+                                throw new InvalidOperationException("BuildCreateAndOpenOps for a root child must produce PUTROOTFH + OPEN.");
+                            }
+
+                            OPEN4args? createOpen = createOps[1].opopen;
+                            state_owner4? createOwner = createOpen?.owner?.Value;
+                            openflag4? createOpenHow = createOpen?.openhow;
+                            createhow4? createHow = createOpenHow?.how;
+                            fattr4? createAttrs = createHow?.createattrs;
+                            byte[]? createFile = createOpen?.claim?.file?.Value?.Value?.Value;
+                            if (createOpen?.seqid?.Value != 12
+                                || createOpen.share_access != (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_WRITE
+                                || createOpen.share_deny != (uint)Nfs41Constants.OPEN4_SHARE_DENY_READ
+                                || createOwner?.clientid?.Value != 5678
+                                || createOpenHow?.opentype != opentype4.OPEN4_CREATE
+                                || createHow?.mode != createmode4.UNCHECKED4
+                                || createAttrs?.attrmask?.Value is not uint[] attrWords
+                                || attrWords.Length != 0
+                                || createAttrs?.attr_vals?.Value is not byte[] attrBytes
+                                || attrBytes.Length != 0
+                                || createOpen.claim?.claim != open_claim_type4.CLAIM_NULL
+                                || createFile is null
+                                || System.Text.Encoding.UTF8.GetString(createFile) != "leaf.txt")
+                            {
+                                throw new InvalidOperationException("Create OPEN args must carry create mode, empty createattrs, owner state, share mode, and final file claim.");
+                            }
+
+                            bool exclusiveGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildCreateAndOpenOps(
+                                    "exclusive.txt",
+                                    clientId: 5678,
+                                    owner: "owner-b",
+                                    sequenceId: 13,
+                                    shareAccess: (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_WRITE,
+                                    shareDeny: (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE,
+                                    createMode: createmode4.EXCLUSIVE4);
+                            }
+                            catch (ArgumentException)
+                            {
+                                exclusiveGuardFired = true;
+                            }
+
+                            if (!exclusiveGuardFired)
+                            {
+                                throw new InvalidOperationException("BuildCreateAndOpenOps must reject exclusive create modes without verifier payloads.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsCloseCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + CLOSE COMPOUND op sequence",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            stateid4 stateid = new stateid4
+                            {
+                                seqid = 17,
+                                other = new byte[12] { 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144 },
+                            };
+
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildCloseOps(
+                                "/data/file.bin",
+                                stateid,
+                                sequenceId: 18);
+
+                            if (ops.Count != 4
+                                || ops[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || ops[1].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[2].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[3].argop != nfs_opnum4.OP_CLOSE)
+                            {
+                                throw new InvalidOperationException("BuildCloseOps must produce PUTROOTFH + 2 LOOKUPs + CLOSE for /data/file.bin.");
+                            }
+
+                            CLOSE4args? closeArgs = ops[3].opclose;
+                            stateid4? closeStateid = closeArgs?.open_stateid;
+                            if (closeArgs?.seqid?.Value != 18
+                                || closeStateid?.seqid != 17
+                                || closeStateid?.other is not byte[] otherBytes
+                                || otherBytes.Length != 12)
+                            {
+                                throw new InvalidOperationException("CLOSE args must carry the supplied sequence id and open stateid.");
                             }
 
                             _ = cancellationToken;

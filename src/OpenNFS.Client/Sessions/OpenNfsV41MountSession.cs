@@ -98,7 +98,7 @@ namespace OpenNFS.Client.Sessions
     }
 
     /// <summary>
-    /// Path-first file helpers backed by <see cref="OpenNfsV41PathOperations.BuildReadOps"/>.
+    /// Path-first file helpers backed by <see cref="OpenNfsV41PathOperations"/>.
     /// </summary>
     public sealed class OpenNfsV41MountSessionFiles
     {
@@ -107,6 +107,80 @@ namespace OpenNFS.Client.Sessions
         internal OpenNfsV41MountSessionFiles(OpenNfsV41ClientSession session)
         {
             _session = session;
+        }
+
+        /// <summary>
+        /// Returns a non-throwing envelope containing the existing-file <c>OPEN</c> COMPOUND outcome
+        /// for the supplied path and open owner.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="clientId">The NFSv4.1 client id assigned by the server.</param>
+        /// <param name="owner">The caller-stable open-owner identifier.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <param name="shareAccess">The OPEN4_SHARE_ACCESS_* value.</param>
+        /// <param name="shareDeny">The OPEN4_SHARE_DENY_* value.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The envelope.</returns>
+        public Task<OpenNfsV41CompoundResult> OpenExistingAsync(
+            string path,
+            ulong clientId,
+            string owner,
+            uint sequenceId,
+            uint shareAccess,
+            uint shareDeny,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildOpenExistingOps(
+                path, clientId, owner, sequenceId, shareAccess, shareDeny);
+            return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-open", cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns a non-throwing envelope containing the create <c>OPEN</c> COMPOUND outcome for the
+        /// supplied path and open owner.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="clientId">The NFSv4.1 client id assigned by the server.</param>
+        /// <param name="owner">The caller-stable open-owner identifier.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <param name="shareAccess">The OPEN4_SHARE_ACCESS_* value.</param>
+        /// <param name="shareDeny">The OPEN4_SHARE_DENY_* value.</param>
+        /// <param name="createMode">The create mode. Only <c>UNCHECKED4</c> and <c>GUARDED4</c>
+        /// are supported by this convenience builder.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The envelope.</returns>
+        public Task<OpenNfsV41CompoundResult> CreateAndOpenAsync(
+            string path,
+            ulong clientId,
+            string owner,
+            uint sequenceId,
+            uint shareAccess,
+            uint shareDeny,
+            createmode4 createMode,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildCreateAndOpenOps(
+                path, clientId, owner, sequenceId, shareAccess, shareDeny, createMode);
+            return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-create-open", cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns a non-throwing envelope containing the <c>CLOSE</c> COMPOUND outcome for the
+        /// supplied path and open stateid.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="stateid">The open state id to close.</param>
+        /// <param name="sequenceId">The open-owner sequence id.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The envelope.</returns>
+        public Task<OpenNfsV41CompoundResult> CloseAsync(
+            string path,
+            stateid4 stateid,
+            uint sequenceId,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildCloseOps(path, stateid, sequenceId);
+            return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-close", cancellationToken);
         }
 
         /// <summary>
