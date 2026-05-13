@@ -186,6 +186,49 @@ namespace OpenNFS.Client.Sessions
         }
 
         /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>WRITE</c> COMPOUND-op sequence for
+        /// writing to the file at the supplied path. The result is intended to be passed to
+        /// <see cref="OpenNfsV41ClientSession.SendCompoundAsync"/>.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="stateid">The state id authorizing the write.</param>
+        /// <param name="offset">The byte offset to begin writing at.</param>
+        /// <param name="stable">The requested write stability.</param>
+        /// <param name="data">The bytes to write. The array is defensively copied.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="stateid"/> or
+        /// <paramref name="data"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> contains '..' segments.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildWriteOps(
+            string path,
+            stateid4 stateid,
+            ulong offset,
+            stable_how4 stable,
+            byte[] data)
+        {
+            ArgumentNullException.ThrowIfNull(stateid);
+            ArgumentNullException.ThrowIfNull(data);
+
+            byte[] dataCopy = new byte[data.Length];
+            Buffer.BlockCopy(data, 0, dataCopy, 0, data.Length);
+
+            List<nfs_argop4> ops = BuildPathPrefixOps(path ?? string.Empty);
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_WRITE,
+                opwrite = new WRITE4args
+                {
+                    stateid = stateid,
+                    offset = new offset4 { Value = offset },
+                    stable = stable,
+                    data = dataCopy,
+                },
+            });
+
+            return ops;
+        }
+
+        /// <summary>
         /// Builds a <c>PUTROOTFH</c> + <c>LOOKUP</c>-walk + <c>READDIR</c> COMPOUND-op sequence for
         /// listing the directory at the supplied path. The result is intended to be passed to
         /// <see cref="OpenNfsV41ClientSession.SendCompoundAsync"/>.
@@ -242,6 +285,43 @@ namespace OpenNFS.Client.Sessions
             return ops;
         }
 
+        /// <summary>
+        /// Builds a <c>PUTROOTFH</c> + parent <c>LOOKUP</c>-walk + <c>REMOVE</c> COMPOUND-op sequence
+        /// for deleting a directory entry.
+        /// </summary>
+        /// <param name="path">The file or directory entry path, relative to the export root.</param>
+        /// <returns>The op sequence.</returns>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is empty, names
+        /// only the export root, or contains '..' segments.</exception>
+        public static IReadOnlyList<nfs_argop4> BuildRemoveOps(string path)
+        {
+            IReadOnlyList<byte[]> components = SplitPathComponents(path ?? string.Empty);
+            if (components.Count == 0)
+            {
+                throw new ArgumentException(
+                    "NFSv4.1 REMOVE requires a named path under the export root.",
+                    nameof(path));
+            }
+
+            List<nfs_argop4> ops = BuildPathPrefixOps(JoinPathComponents(components, components.Count - 1));
+            ops.Add(new nfs_argop4
+            {
+                argop = nfs_opnum4.OP_REMOVE,
+                opremove = new REMOVE4args
+                {
+                    target = new component4
+                    {
+                        Value = new utf8str_cs
+                        {
+                            Value = new utf8string { Value = components[components.Count - 1] },
+                        },
+                    },
+                },
+            });
+
+            return ops;
+        }
+
         private static List<nfs_argop4> BuildPathPrefixOps(string path)
         {
             IReadOnlyList<byte[]> components = SplitPathComponents(path);
@@ -269,6 +349,22 @@ namespace OpenNFS.Client.Sessions
             }
 
             return ops;
+        }
+
+        private static string JoinPathComponents(IReadOnlyList<byte[]> components, int count)
+        {
+            if (count <= 0)
+            {
+                return string.Empty;
+            }
+
+            string[] names = new string[count];
+            for (int index = 0; index < count; index++)
+            {
+                names[index] = Encoding.UTF8.GetString(components[index]);
+            }
+
+            return string.Join("/", names);
         }
     }
 }

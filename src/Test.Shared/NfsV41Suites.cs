@@ -676,14 +676,18 @@ namespace Test.Shared
                             EnsurePublicProperty(typeof(OpenNfsV41MountSession), nameof(OpenNfsV41MountSession.Directories));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionMetadata), nameof(OpenNfsV41MountSessionMetadata.GetAttributesAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.ReadAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionFiles), nameof(OpenNfsV41MountSessionFiles.WriteAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41MountSessionDirectories), nameof(OpenNfsV41MountSessionDirectories.ListAsync));
+                            EnsurePublicMethod(typeof(OpenNfsV41MountSessionDirectories), nameof(OpenNfsV41MountSessionDirectories.RemoveAsync));
 
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildAttributeMask));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildStatLikeAttributeMask));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.SplitPathComponents));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildGetAttributesOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReadOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildWriteOps));
                             EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildReaddirOps));
+                            EnsurePublicMethod(typeof(OpenNfsV41PathOperations), nameof(OpenNfsV41PathOperations.BuildRemoveOps));
 
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.EstablishAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41ClientSession), nameof(OpenNfsV41ClientSession.SendCompoundAsync));
@@ -1708,6 +1712,72 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsWriteCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + WRITE COMPOUND op sequence with copied payload bytes",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            stateid4 stateid = new stateid4
+                            {
+                                seqid = 9,
+                                other = new byte[12] { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 },
+                            };
+                            byte[] payload = new byte[] { 0x41, 0x42, 0x43 };
+
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildWriteOps(
+                                "/data/file.bin",
+                                stateid,
+                                offset: 123,
+                                stable_how4.FILE_SYNC4,
+                                payload);
+
+                            if (ops.Count != 4
+                                || ops[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || ops[1].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[2].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[3].argop != nfs_opnum4.OP_WRITE)
+                            {
+                                throw new InvalidOperationException("BuildWriteOps must produce PUTROOTFH + 2 LOOKUPs + WRITE for /data/file.bin.");
+                            }
+
+                            WRITE4args? writeArgs = ops[3].opwrite;
+                            if (writeArgs?.stateid is null
+                                || writeArgs.stateid.seqid != 9
+                                || writeArgs.offset?.Value != 123
+                                || writeArgs.stable != stable_how4.FILE_SYNC4
+                                || writeArgs.data is not byte[] writtenBytes
+                                || !writtenBytes.SequenceEqual(new byte[] { 0x41, 0x42, 0x43 }))
+                            {
+                                throw new InvalidOperationException("WRITE args must carry the supplied stateid, offset, stability, and data.");
+                            }
+
+                            payload[0] = 0x7A;
+                            if (writeArgs.data![0] != 0x41)
+                            {
+                                throw new InvalidOperationException("BuildWriteOps must defensively copy payload bytes.");
+                            }
+
+                            bool nullDataGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildWriteOps("/x", stateid, 0, stable_how4.UNSTABLE4, data: null!);
+                            }
+                            catch (ArgumentNullException)
+                            {
+                                nullDataGuardFired = true;
+                            }
+
+                            if (!nullDataGuardFired)
+                            {
+                                throw new InvalidOperationException("BuildWriteOps must reject a null data argument.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
                         caseId: "PathOperationsBuildsReaddirCompound",
                         displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + LOOKUP-walk + READDIR COMPOUND op sequence with the supplied cookie, verifier, and attribute mask",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
@@ -1789,6 +1859,57 @@ namespace Test.Shared
                                 || rootOps[1].argop != nfs_opnum4.OP_READDIR)
                             {
                                 throw new InvalidOperationException("Empty path with BuildReaddirOps must produce exactly PUTROOTFH + READDIR.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "PathOperationsBuildsRemoveCompound",
+                        displayName: "OpenNfsV41PathOperations builds a PUTROOTFH + parent LOOKUP-walk + REMOVE COMPOUND op sequence",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildRemoveOps("/data/file.bin");
+                            if (ops.Count != 3
+                                || ops[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || ops[1].argop != nfs_opnum4.OP_LOOKUP
+                                || ops[2].argop != nfs_opnum4.OP_REMOVE)
+                            {
+                                throw new InvalidOperationException("BuildRemoveOps must produce PUTROOTFH + parent LOOKUP + REMOVE for /data/file.bin.");
+                            }
+
+                            REMOVE4args? removeArgs = ops[2].opremove;
+                            byte[]? targetBytes = removeArgs?.target?.Value?.Value?.Value;
+                            if (targetBytes is null
+                                || !targetBytes.SequenceEqual(new byte[] { 0x66, 0x69, 0x6C, 0x65, 0x2E, 0x62, 0x69, 0x6E }))
+                            {
+                                throw new InvalidOperationException("REMOVE args must carry only the final path component as the target name.");
+                            }
+
+                            IReadOnlyList<nfs_argop4> rootChildOps = OpenNfsV41PathOperations.BuildRemoveOps("leaf.txt");
+                            if (rootChildOps.Count != 2
+                                || rootChildOps[0].argop != nfs_opnum4.OP_PUTROOTFH
+                                || rootChildOps[1].argop != nfs_opnum4.OP_REMOVE)
+                            {
+                                throw new InvalidOperationException("BuildRemoveOps for a root child must produce PUTROOTFH + REMOVE.");
+                            }
+
+                            bool emptyPathGuardFired = false;
+                            try
+                            {
+                                _ = OpenNfsV41PathOperations.BuildRemoveOps("/");
+                            }
+                            catch (ArgumentException)
+                            {
+                                emptyPathGuardFired = true;
+                            }
+
+                            if (!emptyPathGuardFired)
+                            {
+                                throw new InvalidOperationException("BuildRemoveOps must reject the export root as a removal target.");
                             }
 
                             _ = cancellationToken;

@@ -129,6 +129,29 @@ namespace OpenNFS.Client.Sessions
             IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildReadOps(path, stateid, offset, count);
             return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-read", cancellationToken);
         }
+
+        /// <summary>
+        /// Returns a non-throwing envelope containing the <c>WRITE</c> COMPOUND outcome for the
+        /// supplied path, stateid, offset, stability request, and payload.
+        /// </summary>
+        /// <param name="path">The file path, relative to the export root.</param>
+        /// <param name="stateid">The state id authorizing the write.</param>
+        /// <param name="offset">The byte offset to begin writing at.</param>
+        /// <param name="stable">The requested write stability.</param>
+        /// <param name="data">The bytes to write.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The envelope.</returns>
+        public Task<OpenNfsV41CompoundResult> WriteAsync(
+            string path,
+            stateid4 stateid,
+            ulong offset,
+            stable_how4 stable,
+            byte[] data,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildWriteOps(path, stateid, offset, stable, data);
+            return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-write", cancellationToken);
+        }
     }
 
     /// <summary>
@@ -168,6 +191,19 @@ namespace OpenNFS.Client.Sessions
             IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildReaddirOps(
                 path, cookie, cookieVerifier, dircount, maxcount, attributeMask);
             return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-readdir", cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns a non-throwing envelope containing the <c>REMOVE</c> COMPOUND outcome for the
+        /// supplied file or directory-entry path.
+        /// </summary>
+        /// <param name="path">The entry path, relative to the export root.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The envelope.</returns>
+        public Task<OpenNfsV41CompoundResult> RemoveAsync(string path, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<nfs_argop4> ops = OpenNfsV41PathOperations.BuildRemoveOps(path);
+            return _session.TrySendCompoundAsync(ops, cacheReply: false, tag: "v41-mount-remove", cancellationToken);
         }
     }
 }
