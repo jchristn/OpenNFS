@@ -2059,7 +2059,7 @@ namespace Test.Shared
 
                 DockerCommandResult result =
                     await DockerLinuxNfsClient.RunCommandAsync(
-                        CreateLinuxMountCommand(host.MountPort, host.NfsPort),
+                        CreateLinuxReadWriteDeleteMountCommand(host.MountPort, host.NfsPort),
                         cancellationToken).ConfigureAwait(false);
 
                 if (result.ExitCode != 0)
@@ -2080,6 +2080,8 @@ namespace Test.Shared
 
                 if (!combinedOutput.Contains("hello-from-opennfs", StringComparison.Ordinal)
                     || !combinedOutput.Contains("nested-from-opennfs", StringComparison.Ordinal)
+                    || !combinedOutput.Contains("created-from-linux-client", StringComparison.Ordinal)
+                    || !combinedOutput.Contains("delete-verified", StringComparison.Ordinal)
                     || !combinedOutput.Contains("d", StringComparison.Ordinal)
                     || !combinedOutput.Contains("h.txt", StringComparison.Ordinal))
                 {
@@ -2428,6 +2430,27 @@ namespace Test.Shared
         private static string CreateLinuxMountCommand(int mountPort, int nfsPort)
         {
             return CreateLinuxReadOnlyMountCommand(mountPort, nfsPort, "/export", "h.txt", "d/n.txt");
+        }
+
+        private static string CreateLinuxReadWriteDeleteMountCommand(int mountPort, int nfsPort)
+        {
+            return string.Concat(
+                "set -eu; ",
+                "mkdir -p /mnt/opennfs; ",
+                "mount -t nfs -o vers=3,proto=tcp,mountproto=tcp,port=", nfsPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ",mountport=", mountPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ",nolock,soft,timeo=10,retrans=1 host.docker.internal:/export /mnt/opennfs; ",
+                "cat /mnt/opennfs/h.txt; ",
+                "cat /mnt/opennfs/d/n.txt; ",
+                "printf 'created-from-linux-client' > /mnt/opennfs/linux-created.txt; ",
+                "sync; ",
+                "cat /mnt/opennfs/linux-created.txt; ",
+                "rm /mnt/opennfs/linux-created.txt; ",
+                "sync; ",
+                "if [ -e /mnt/opennfs/linux-created.txt ]; then exit 1; fi; ",
+                "echo delete-verified; ",
+                "ls -1 /mnt/opennfs; ",
+                "umount /mnt/opennfs");
         }
 
         private static string CreateLinuxReadOnlyMountCommand(
