@@ -1,6 +1,7 @@
 namespace OpenNFS.Client.Sessions
 {
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.Net;
     using System.Net.Sockets;
@@ -17,6 +18,8 @@ namespace OpenNFS.Client.Sessions
     /// </summary>
     internal sealed class OpenNfsV41ClientConnection : IAsyncDisposable
     {
+        private readonly OpenNfsAuthenticationFlavor authenticationFlavor;
+        private readonly OpenNfsAuthSysCredentials authSysCredentials;
         private readonly TcpClient tcpClient;
         private readonly NetworkStream stream;
         private readonly RpcTcpTransport transport;
@@ -24,8 +27,15 @@ namespace OpenNFS.Client.Sessions
         private uint nextXid;
         private bool isDisposed;
 
-        private OpenNfsV41ClientConnection(TcpClient tcpClient, NetworkStream stream, RpcTcpTransport transport)
+        private OpenNfsV41ClientConnection(
+            OpenNfsAuthenticationFlavor authenticationFlavor,
+            OpenNfsAuthSysCredentials authSysCredentials,
+            TcpClient tcpClient,
+            NetworkStream stream,
+            RpcTcpTransport transport)
         {
+            this.authenticationFlavor = authenticationFlavor;
+            this.authSysCredentials = authSysCredentials;
             this.tcpClient = tcpClient;
             this.stream = stream;
             this.transport = transport;
@@ -41,9 +51,12 @@ namespace OpenNFS.Client.Sessions
             IPEndPoint endpoint,
             TimeSpan connectTimeout,
             TimeSpan callTimeout,
+            OpenNfsAuthenticationFlavor authenticationFlavor,
+            OpenNfsAuthSysCredentials authSysCredentials,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(endpoint);
+            ArgumentNullException.ThrowIfNull(authSysCredentials);
 
             TcpClient tcpClient = new TcpClient(AddressFamily.InterNetwork)
             {
@@ -71,7 +84,7 @@ namespace OpenNFS.Client.Sessions
                         readTimeout: callTimeout,
                         writeTimeout: callTimeout)));
 
-            return new OpenNfsV41ClientConnection(tcpClient, stream, transport);
+            return new OpenNfsV41ClientConnection(authenticationFlavor, authSysCredentials, tcpClient, stream, transport);
         }
 
         internal async Task<COMPOUND4res> SendCompoundAsync(COMPOUND4args arguments, CancellationToken cancellationToken)
@@ -91,7 +104,7 @@ namespace OpenNFS.Client.Sessions
                     program: (uint)NFS4_PROGRAM_Program.Program,
                     version: (uint)NFS4_PROGRAM_Program.Version_NFS_V4,
                     procedure: (uint)NFS4_PROGRAM_Program.Procedure_NFS_V4_NFSPROC4_COMPOUND,
-                    credential: RpcAuthenticationCodec.CreateNone(),
+                    credential: CreateRpcCredential(authenticationFlavor, authSysCredentials, xid),
                     verifier: RpcAuthenticationCodec.CreateNone(),
                     procedurePayload: argumentsWriter.ToArray());
 
@@ -168,6 +181,61 @@ namespace OpenNFS.Client.Sessions
             {
                 throw new ObjectDisposedException(nameof(OpenNfsV41ClientConnection));
             }
+        }
+
+        private static opaque_auth CreateRpcCredential(
+            OpenNfsAuthenticationFlavor authenticationFlavor,
+            OpenNfsAuthSysCredentials authSysCredentials,
+            uint xid)
+        {
+            return authenticationFlavor switch
+            {
+                OpenNfsAuthenticationFlavor.AuthNone => RpcAuthenticationCodec.CreateNone(),
+                OpenNfsAuthenticationFlavor.AuthSys => CreateAuthSysCredential(authSysCredentials, xid),
+                OpenNfsAuthenticationFlavor.RpcSecGss => throw new OpenNfsClientProtocolException(
+                    "RPCSEC_GSS is not available on the current public OpenNFS client surface. "
+                    + "See OPENNFS.md for the remaining security work.",
+                    contextName: nameof(OpenNfsAuthenticationFlavor.RpcSecGss),
+                    category: OpenNfsErrorCategory.Unsupported,
+                    isRetryable: false,
+                    innerException: null),
+                _ => throw new OpenNfsClientProtocolException(
+                    "The client execution path does not support authentication flavor '"
+                    + authenticationFlavor.ToString() + "'.",
+                    contextName: nameof(authenticationFlavor),
+                    category: OpenNfsErrorCategory.Unsupported,
+                    isRetryable: false,
+                    innerException: null),
+            };
+        }
+
+        private static opaque_auth CreateAuthSysCredential(OpenNfsAuthSysCredentials authSysCredentials, uint xid)
+        {
+            return RpcAuthenticationCodec.CreateSystem(
+                new authsys_parms
+                {
+                    stamp = xid,
+                    machinename = authSysCredentials.MachineName,
+                    uid = authSysCredentials.UserId,
+                    gid = authSysCredentials.GroupId,
+                    gids = CopySupplementaryGroupIds(authSysCredentials.SupplementaryGroupIds),
+                });
+        }
+
+        private static uint[] CopySupplementaryGroupIds(IReadOnlyList<uint> supplementaryGroupIds)
+        {
+            if (supplementaryGroupIds.Count == 0)
+            {
+                return Array.Empty<uint>();
+            }
+
+            uint[] copy = new uint[supplementaryGroupIds.Count];
+            for (int index = 0; index < supplementaryGroupIds.Count; index++)
+            {
+                copy[index] = supplementaryGroupIds[index];
+            }
+
+            return copy;
         }
     }
 }

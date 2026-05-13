@@ -28,6 +28,8 @@ namespace OpenNFS.Client.Sessions
         private readonly TimeSpan callTimeout;
         private readonly TimeSpan connectTimeout;
         private readonly IPEndPoint endpoint;
+        private readonly OpenNfsAuthenticationFlavor authenticationFlavor;
+        private readonly OpenNfsAuthSysCredentials authSysCredentials;
         private readonly byte[] sessionId;
         private readonly ulong clientId;
         private readonly bool autoReconnect;
@@ -48,6 +50,8 @@ namespace OpenNFS.Client.Sessions
             TimeSpan callTimeout,
             TimeSpan connectTimeout,
             IPEndPoint endpoint,
+            OpenNfsAuthenticationFlavor authenticationFlavor,
+            OpenNfsAuthSysCredentials authSysCredentials,
             bool autoReconnect,
             int maximumReconnectAttempts,
             ulong serverMinorId,
@@ -60,6 +64,8 @@ namespace OpenNFS.Client.Sessions
             this.callTimeout = callTimeout;
             this.connectTimeout = connectTimeout;
             this.endpoint = endpoint;
+            this.authenticationFlavor = authenticationFlavor;
+            this.authSysCredentials = authSysCredentials;
             this.autoReconnect = autoReconnect;
             this.maximumReconnectAttempts = Math.Max(0, maximumReconnectAttempts);
             this.serverMinorId = serverMinorId;
@@ -173,7 +179,13 @@ namespace OpenNFS.Client.Sessions
             ArgumentNullException.ThrowIfNull(options);
 
             OpenNfsV41ClientConnection connection = await OpenNfsV41ClientConnection
-                .ConnectAsync(options.Endpoint, options.ConnectTimeout, options.CallTimeout, cancellationToken)
+                .ConnectAsync(
+                    options.Endpoint,
+                    options.ConnectTimeout,
+                    options.CallTimeout,
+                    options.AuthenticationFlavor,
+                    options.AuthSysCredentials,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             try
@@ -239,6 +251,8 @@ namespace OpenNFS.Client.Sessions
                     options.CallTimeout,
                     options.ConnectTimeout,
                     options.Endpoint,
+                    options.AuthenticationFlavor,
+                    options.AuthSysCredentials,
                     options.AutoReconnect,
                     options.MaximumReconnectAttempts,
                     issuedServerMinorId,
@@ -430,7 +444,13 @@ namespace OpenNFS.Client.Sessions
                 }
 
                 OpenNfsV41ClientConnection newConnection = await OpenNfsV41ClientConnection
-                    .ConnectAsync(endpoint, connectTimeout, callTimeout, cancellationToken)
+                    .ConnectAsync(
+                        endpoint,
+                        connectTimeout,
+                        callTimeout,
+                        authenticationFlavor,
+                        authSysCredentials,
+                        cancellationToken)
                     .ConfigureAwait(false);
 
                 try
@@ -501,7 +521,13 @@ namespace OpenNFS.Client.Sessions
             {
                 OpenNfsV41ClientConnection oldConnection = connection;
                 OpenNfsV41ClientConnection newConnection = await OpenNfsV41ClientConnection
-                    .ConnectAsync(endpoint, connectTimeout, callTimeout, cancellationToken)
+                    .ConnectAsync(
+                        endpoint,
+                        connectTimeout,
+                        callTimeout,
+                        authenticationFlavor,
+                        authSysCredentials,
+                        cancellationToken)
                     .ConfigureAwait(false);
 
                 try

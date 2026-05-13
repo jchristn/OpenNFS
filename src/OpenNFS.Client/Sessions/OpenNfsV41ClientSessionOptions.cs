@@ -2,6 +2,7 @@ namespace OpenNFS.Client.Sessions
 {
     using System;
     using System.Net;
+    using OpenNFS.Client;
 
     /// <summary>
     /// Configures a single NFSv4.1 client session establishment.
@@ -23,9 +24,13 @@ namespace OpenNFS.Client.Sessions
             RequestedSlots = 8;
             ConnectTimeout = TimeSpan.FromSeconds(15);
             CallTimeout = TimeSpan.FromSeconds(30);
+            AuthenticationFlavor = OpenNfsAuthenticationFlavor.AuthSys;
+            authSysCredentials = OpenNfsAuthSysCredentials.Default;
             AutoReconnect = false;
             MaximumReconnectAttempts = 1;
         }
+
+        private OpenNfsAuthSysCredentials authSysCredentials;
 
         /// <summary>
         /// Gets the server endpoint to connect to.
@@ -55,6 +60,28 @@ namespace OpenNFS.Client.Sessions
         /// Gets or sets the timeout for each individual COMPOUND call.
         /// </summary>
         public TimeSpan CallTimeout { get; set; }
+
+        /// <summary>
+        /// Gets or sets the RPC authentication flavor used for NFSv4.1 COMPOUND traffic.
+        /// </summary>
+        public OpenNfsAuthenticationFlavor AuthenticationFlavor { get; set; }
+
+        /// <summary>
+        /// Gets or sets the AUTH_SYS identity values used when <see cref="AuthenticationFlavor"/> is
+        /// <see cref="OpenNfsAuthenticationFlavor.AuthSys"/>.
+        /// </summary>
+        public OpenNfsAuthSysCredentials AuthSysCredentials
+        {
+            get
+            {
+                return authSysCredentials;
+            }
+
+            set
+            {
+                authSysCredentials = value ?? throw new ArgumentNullException(nameof(value));
+            }
+        }
 
         /// <summary>
         /// Gets or sets a value indicating whether the session should automatically reconnect and retry
