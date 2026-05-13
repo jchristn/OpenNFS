@@ -4,6 +4,7 @@ namespace Test.Shared
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Text;
     using System.Text.Json;
     using System.Threading;
     using System.Threading.Tasks;
@@ -387,7 +388,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         suiteId: "ReleaseReadinessSuites",
                         caseId: "PackedClientPackageExecutesAgainstSampleKnfsdAndGanesha",
-                        displayName: "A clean packaged OpenNFS.Client consumer executes the current peer matrix against the sample server, knfsd, and nfs-ganesha",
+                        displayName: "A clean packaged OpenNFS.Client consumer executes the current peer matrix against the sample server, unfs3, knfsd, and nfs-ganesha",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },
                         skip: !probe.IsAvailable,
                         skipReason: probe.SkipReason,
@@ -396,7 +397,7 @@ namespace Test.Shared
                     new TestCaseDescriptor(
                         suiteId: "ReleaseReadinessSuites",
                         caseId: "PackedClientPackageSurfacesNegativeResultsAgainstSampleKnfsdAndGanesha",
-                        displayName: "A clean packaged OpenNFS.Client consumer surfaces negative results against the sample server, knfsd, and nfs-ganesha",
+                        displayName: "A clean packaged OpenNFS.Client consumer surfaces negative results against the sample server, unfs3, knfsd, and nfs-ganesha",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },
                         skip: !probe.IsAvailable,
                         skipReason: probe.SkipReason,
@@ -778,14 +779,19 @@ namespace Test.Shared
             string sampleRoot = CreateTempDirectory("PackedClientPeerMatrixPositive.Sample");
             string sampleSource = Path.Combine(sampleRoot, "source");
             string sampleMapping = Path.Combine(sampleRoot, "handles.json");
+            string unfs3Root = CreateTempDirectory("PackedClientPeerMatrixPositive.Unfs3");
 
             try
             {
+                CreateLinuxServerExportLayout(unfs3Root);
+
                 await using SampleOpenNfsServerProcess sample = await SampleOpenNfsServerProcess.StartAsync(
                     sampleSource,
                     sampleMapping,
                     denyMounts: false,
                     cancellationToken).ConfigureAwait(false);
+                await using DockerLinuxNfsServerContainer unfs3 =
+                    await DockerLinuxNfsServerContainer.StartAsync(unfs3Root, cancellationToken).ConfigureAwait(false);
                 await using DockerLinuxKnfsdServerContainer knfsd =
                     await DockerLinuxKnfsdServerContainer.StartAsync(cancellationToken).ConfigureAwait(false);
                 await using DockerLinuxNfsV40ServerContainer ganesha =
@@ -796,6 +802,9 @@ namespace Test.Shared
                     sample.MountPort,
                     sample.NfsPort,
                     sample.Nfs40Port,
+                    "127.0.0.1",
+                    unfs3.MountPort,
+                    unfs3.NfsPort,
                     "127.0.0.1",
                     knfsd.MountPort,
                     knfsd.NfsPort,
@@ -826,6 +835,7 @@ namespace Test.Shared
             finally
             {
                 TryDeleteDirectory(sampleRoot);
+                TryDeleteDirectory(unfs3Root);
             }
         }
 
@@ -834,14 +844,19 @@ namespace Test.Shared
             string sampleRoot = CreateTempDirectory("PackedClientPeerMatrixNegative.Sample");
             string sampleSource = Path.Combine(sampleRoot, "source");
             string sampleMapping = Path.Combine(sampleRoot, "handles.json");
+            string unfs3Root = CreateTempDirectory("PackedClientPeerMatrixNegative.Unfs3");
 
             try
             {
+                CreateLinuxServerExportLayout(unfs3Root);
+
                 await using SampleOpenNfsServerProcess sample = await SampleOpenNfsServerProcess.StartAsync(
                     sampleSource,
                     sampleMapping,
                     denyMounts: false,
                     cancellationToken).ConfigureAwait(false);
+                await using DockerLinuxNfsServerContainer unfs3 =
+                    await DockerLinuxNfsServerContainer.StartAsync(unfs3Root, cancellationToken).ConfigureAwait(false);
                 await using DockerLinuxKnfsdServerContainer knfsd =
                     await DockerLinuxKnfsdServerContainer.StartAsync(cancellationToken).ConfigureAwait(false);
                 await using DockerLinuxNfsV40ServerContainer ganesha =
@@ -852,6 +867,9 @@ namespace Test.Shared
                     sample.MountPort,
                     sample.NfsPort,
                     sample.Nfs40Port,
+                    "127.0.0.1",
+                    unfs3.MountPort,
+                    unfs3.NfsPort,
                     "127.0.0.1",
                     knfsd.NfsPort,
                     "127.0.0.1",
@@ -881,7 +899,16 @@ namespace Test.Shared
             finally
             {
                 TryDeleteDirectory(sampleRoot);
+                TryDeleteDirectory(unfs3Root);
             }
+        }
+
+        private static void CreateLinuxServerExportLayout(string exportDirectory)
+        {
+            Directory.CreateDirectory(exportDirectory);
+            Directory.CreateDirectory(Path.Combine(exportDirectory, "d"));
+            File.WriteAllBytes(Path.Combine(exportDirectory, "h.txt"), Encoding.UTF8.GetBytes("0123456789ABCDEF"));
+            File.WriteAllBytes(Path.Combine(exportDirectory, "d", "n.txt"), Encoding.UTF8.GetBytes("nested-from-linux"));
         }
 
         private static async Task<DotnetCommandResult> RunExternalPackageConsumerProjectAsync(

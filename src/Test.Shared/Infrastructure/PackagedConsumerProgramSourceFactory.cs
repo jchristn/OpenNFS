@@ -10,6 +10,9 @@ namespace Test.Shared.Infrastructure
             int sampleMountPort,
             int sampleNfsPort,
             int sampleNfs40Port,
+            string unfs3Host,
+            int unfs3MountPort,
+            int unfs3NfsPort,
             string knfsdHost,
             int knfsdMountPort,
             int knfsdNfsPort,
@@ -49,6 +52,16 @@ public static class Program
             "hello-from-sample-opennfs",
             "package-client-v40.txt",
             "written-through-packaged-client-v40-sample",
+            cancellationToken);
+        await VerifyMountedExportAsync(
+            "__UNFS3_HOST__",
+            __UNFS3_NFS_PORT__,
+            __UNFS3_MOUNT_PORT__,
+            "/export",
+            "/h.txt",
+            "0123456789ABCDEF",
+            "/package-client-v3.txt",
+            "written-through-packaged-client-v3-unfs3",
             cancellationToken);
         await VerifyMountedExportAsync(
             "__KNFSD_HOST__",
@@ -398,6 +411,9 @@ public static class Program
                 sampleMountPort,
                 sampleNfsPort,
                 sampleNfs40Port,
+                unfs3Host,
+                unfs3MountPort,
+                unfs3NfsPort,
                 knfsdHost,
                 knfsdMountPort,
                 knfsdNfsPort,
@@ -410,6 +426,9 @@ public static class Program
             int sampleMountPort,
             int sampleNfsPort,
             int sampleNfs40Port,
+            string unfs3Host,
+            int unfs3MountPort,
+            int unfs3NfsPort,
             string knfsdHost,
             int knfsdNfsPort,
             string ganeshaHost,
@@ -430,6 +449,7 @@ public static class Program
 
         await ExpectMountNoEntAsync("__SAMPLE_HOST__", __SAMPLE_NFS_PORT__, __SAMPLE_MOUNT_PORT__, "/missing", cancellationToken);
         await ExpectMissingLookupV40Async("__SAMPLE_HOST__", __SAMPLE_NFS40_PORT__, "sample", "missing.txt", cancellationToken);
+        await ExpectMountNoEntAsync("__UNFS3_HOST__", __UNFS3_NFS_PORT__, __UNFS3_MOUNT_PORT__, "/missing", cancellationToken);
         await ExpectMissingLookupV40Async("__KNFSD_HOST__", __KNFSD_NFS_PORT__, "export", "missing.txt", cancellationToken);
         await ExpectMissingLookupV40Async("__GANESHA_HOST__", __GANESHA_NFS40_PORT__, "export", "missing.txt", cancellationToken);
 
@@ -447,6 +467,7 @@ public static class Program
         await using OpenNfsClient client = new OpenNfsClientBuilder()
             .WithServer(host, nfsPort)
             .WithMountPort(mountPort)
+            .WithUdpForNfsV3(true)
             .Build();
         await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
@@ -534,6 +555,9 @@ public static class Program
                 .Replace("__SAMPLE_MOUNT_PORT__", sampleMountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__SAMPLE_NFS_PORT__", sampleNfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__SAMPLE_NFS40_PORT__", sampleNfs40Port.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("__UNFS3_HOST__", unfs3Host, StringComparison.Ordinal)
+                .Replace("__UNFS3_MOUNT_PORT__", unfs3MountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("__UNFS3_NFS_PORT__", unfs3NfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__KNFSD_HOST__", knfsdHost, StringComparison.Ordinal)
                 .Replace("__KNFSD_NFS_PORT__", knfsdNfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__GANESHA_HOST__", ganeshaHost, StringComparison.Ordinal)
@@ -637,6 +661,9 @@ __EXTRA_TYPES__
             int sampleMountPort,
             int sampleNfsPort,
             int sampleNfs40Port,
+            string unfs3Host,
+            int unfs3MountPort,
+            int unfs3NfsPort,
             string knfsdHost,
             int knfsdMountPort,
             int knfsdNfsPort,
@@ -648,6 +675,9 @@ __EXTRA_TYPES__
                 .Replace("__SAMPLE_MOUNT_PORT__", sampleMountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__SAMPLE_NFS_PORT__", sampleNfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__SAMPLE_NFS40_PORT__", sampleNfs40Port.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("__UNFS3_HOST__", unfs3Host, StringComparison.Ordinal)
+                .Replace("__UNFS3_MOUNT_PORT__", unfs3MountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("__UNFS3_NFS_PORT__", unfs3NfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__KNFSD_HOST__", knfsdHost, StringComparison.Ordinal)
                 .Replace("__KNFSD_MOUNT_PORT__", knfsdMountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
                 .Replace("__KNFSD_NFS_PORT__", knfsdNfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
