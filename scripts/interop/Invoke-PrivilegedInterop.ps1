@@ -26,6 +26,7 @@ $requiredCases = @(
     "InteropSuites.LinuxKernelClientMountsSampleOpenNfsServerArtifact",
     # OpenNFS client → Linux kernel knfsd over NFSv3.
     "InteropSuites.OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServer",
+    "InteropSuites.OpenNfsClientSurfacesNegativeResultsAgainstLinuxKnfsdServer",
     # OpenNFS client → Linux kernel knfsd over NFSv4.0.
     "InteropSuites.OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServerOverNfs40",
     # Reboot-like recovery: post-disconnect replay, NLM grace reclaim, NFSv4.0

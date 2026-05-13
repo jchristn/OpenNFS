@@ -119,6 +119,15 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "InteropSuites",
+                        caseId: "OpenNfsClientSurfacesNegativeResultsAgainstLinuxKnfsdServer",
+                        displayName: "OpenNFS.Client surfaces negative lookup behavior against a real Linux kernel NFS server container",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },
+                        skip: !probe.IsAvailable,
+                        skipReason: probe.SkipReason,
+                        executeAsync: ExecuteNegativeClientAgainstLinuxKnfsdServerAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "InteropSuites",
                         caseId: "OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServerOverNfs40",
                         displayName: "OpenNFS.Client browses, opens, writes, and commits against a real Linux kernel NFSv4.0 server container",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },

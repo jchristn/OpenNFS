@@ -469,6 +469,7 @@ namespace Test.Shared
                     CreateSyntheticTouchstoneResult("InteropSuites", "LinuxKernelClientMountsOpenNfsServer"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "LinuxKernelClientMountsSampleOpenNfsServerArtifact"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServer"),
+                    CreateSyntheticTouchstoneResult("InteropSuites", "OpenNfsClientSurfacesNegativeResultsAgainstLinuxKnfsdServer"),
                     CreateSyntheticTouchstoneResult("InteropSuites", "OpenNfsClientReadsAndWritesAgainstLinuxKnfsdServerOverNfs40"),
                     CreateSyntheticTouchstoneResult("ReplaySuites", "DisconnectReplayRecovery"),
                     CreateSyntheticTouchstoneResult("NlmSuites", "ReclaimAfterServerRestartPositive"),
@@ -516,9 +517,9 @@ namespace Test.Shared
                 using JsonDocument manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false));
                 JsonElement root = manifest.RootElement;
                 if (!root.TryGetProperty("requiredCases", out JsonElement requiredCases)
-                    || requiredCases.GetArrayLength() != 14
+                    || requiredCases.GetArrayLength() != 15
                     || !root.TryGetProperty("validatedCases", out JsonElement validatedCases)
-                    || validatedCases.GetArrayLength() != 14)
+                    || validatedCases.GetArrayLength() != 15)
                 {
                     throw new InvalidOperationException("Expected the privileged interop manifest to record every required validated case.");
                 }

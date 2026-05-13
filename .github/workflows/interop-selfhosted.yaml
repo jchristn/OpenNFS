@@ -69,5 +69,5 @@ jobs:
         if: always()
         with:
           name: selfhosted-interop-results
-          path: artifacts/interop-privileged
+          path: artifacts
           if-no-files-found: error
