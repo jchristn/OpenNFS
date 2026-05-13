@@ -31,7 +31,9 @@ It reflects the debate consensus and is intentionally specific enough that a dev
 
 ## Shipping Scope
 
-### Included in the first supported release
+### Target scope for the first supported release
+
+This section is target scope, not a current support claim. A protocol version or security mode only moves into the supported set after the release checklist, live peer interop, and external conformance gates for that version pass on the release branch.
 
 - ONC RPC v2 over TCP for all supported versions and UDP for NFSv3 only
 - XDR codecs and protocol model generation
@@ -587,6 +589,7 @@ pNFS is intentionally out of scope for the current release line. While implement
   RFC: RFC 7862, RFC 7863
   Acceptance: `Touchstone: NfsV42Suites/AllAdvertisedOpsBound` passes and `pynfs` v4.2-relevant coverage passes where available.
   2026-05-01 note: The remaining non-pNFS v4.2 operation surface is now in place. `src/OpenNFS.Protocol.V42/Server/Operations/Nfs42AdvisoryOperationsProcessor.cs` adds typed handlers for `IO_ADVISE`, `OFFLOAD_CANCEL`, `OFFLOAD_STATUS`, `WRITE_SAME`, and `COPY_NOTIFY`. `IO_ADVISE` succeeds with an empty acknowledged-hints bitmap per RFC 7862 §15.5 (the server is free to honor zero or more hints and "no hints accepted" is standards-compliant). `OFFLOAD_CANCEL` and `OFFLOAD_STATUS` surface `NFS4ERR_NOTSUPP` because asynchronous `COPY` is not advertised by the current server. `WRITE_SAME` surfaces `NFS4ERR_NOTSUPP` because the current server does not advertise it. `COPY_NOTIFY` surfaces `NFS4ERR_NOTSUPP` because cross-server copy is not advertised. The named acceptance Touchstone gate `NfsV42Suites/AllAdvertisedOpsBound` now passes by enumerating every non-pNFS v4.2 op (`ALLOCATE`, `COPY`, `COPY_NOTIFY`, `DEALLOCATE`, `IO_ADVISE`, `OFFLOAD_CANCEL`, `OFFLOAD_STATUS`, `READ_PLUS`, `SEEK`, `WRITE_SAME`, `CLONE`) and verifying each has a real typed handler that returns a non-null status. The pNFS v4.2 ops (`LAYOUTERROR`, `LAYOUTSTATS`) are intentionally not bound here because pNFS is explicitly deferred from the first supported release per the shipping scope; their inclusion is tracked under Milestone 15.1. The `pynfs` v4.2-relevant coverage portion of this acceptance bar remains gated on the `pynfs` infrastructure called out in Phase 13.2, which still requires the external suite root.
+  2026-05-13 note: This milestone remains a typed operation-surface milestone only. It is explicitly not an NFSv4.2 release-support claim until live peer interop and external conformance evidence are added under the release gates.
 
 ## Phase 12: Sample Server and Default Full-Surface Provider
 
