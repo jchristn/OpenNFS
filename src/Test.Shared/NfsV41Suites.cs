@@ -660,6 +660,8 @@ namespace Test.Shared
                             EnsurePublicType(typeof(OpenNfsV41ClientSession));
                             EnsurePublicType(typeof(OpenNfsV41CompoundOutcome));
                             EnsurePublicType(typeof(OpenNfsV41CompoundResult));
+                            EnsurePublicType(typeof(OpenNfsV41CompoundResultReaders));
+                            EnsurePublicType(typeof(OpenNfsV41ReadPayload));
                             EnsurePublicType(typeof(OpenNfsV41CallbackHandler));
                             EnsurePublicType(typeof(OpenNfsV41CallbackDispatcher));
                             EnsurePublicType(typeof(Nfs41CallbackChannelHost));
@@ -715,11 +717,176 @@ namespace Test.Shared
                             EnsurePublicProperty(typeof(OpenNfsV41CompoundResult), nameof(OpenNfsV41CompoundResult.IsFullSuccess));
                             EnsurePublicProperty(typeof(OpenNfsV41CompoundResult), nameof(OpenNfsV41CompoundResult.HasPartialResults));
                             EnsurePublicProperty(typeof(OpenNfsV41CompoundResult), nameof(OpenNfsV41CompoundResult.ReachedServer));
+                            EnsurePublicProperty(typeof(OpenNfsV41ReadPayload), nameof(OpenNfsV41ReadPayload.Data));
+                            EnsurePublicProperty(typeof(OpenNfsV41ReadPayload), nameof(OpenNfsV41ReadPayload.EndOfFile));
+                            EnsurePublicMethod(typeof(OpenNfsV41CompoundResultReaders), nameof(OpenNfsV41CompoundResultReaders.TryGetOpenStateId));
+                            EnsurePublicMethod(typeof(OpenNfsV41CompoundResultReaders), nameof(OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow));
+                            EnsurePublicMethod(typeof(OpenNfsV41CompoundResultReaders), nameof(OpenNfsV41CompoundResultReaders.TryGetReadPayload));
+                            EnsurePublicMethod(typeof(OpenNfsV41CompoundResultReaders), nameof(OpenNfsV41CompoundResultReaders.GetReadPayloadOrThrow));
 
                             EnsurePublicMethod(typeof(OpenNfsV41CallbackHandler), nameof(OpenNfsV41CallbackHandler.OnRecallAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41CallbackHandler), nameof(OpenNfsV41CallbackHandler.OnGetAttributesAsync));
                             EnsurePublicMethod(typeof(OpenNfsV41CallbackHandler), nameof(OpenNfsV41CallbackHandler.OnRecallAnyAsync));
 
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "CompoundResultReadersExtractOpenStateAndReadPayload",
+                        displayName: "OpenNfsV41CompoundResultReaders extracts copied OPEN stateids and READ payloads from successful COMPOUND results",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            byte[] stateOther = new byte[12] { 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10, 11 };
+                            byte[] readData = new byte[] { 0x41, 0x42, 0x43 };
+                            OpenNfsV41CompoundResult result = OpenNfsV41CompoundResult.FullSuccess(
+                                new OpenNfsV41CompoundOutcome(
+                                    new COMPOUND4res
+                                    {
+                                        status = nfsstat4.NFS4_OK,
+                                        resarray = new[]
+                                        {
+                                            new nfs_resop4
+                                            {
+                                                resop = nfs_opnum4.OP_SEQUENCE,
+                                                opsequence = new SEQUENCE4res
+                                                {
+                                                    sr_status = nfsstat4.NFS4_OK,
+                                                },
+                                            },
+                                            new nfs_resop4
+                                            {
+                                                resop = nfs_opnum4.OP_OPEN,
+                                                opopen = new OPEN4res
+                                                {
+                                                    status = nfsstat4.NFS4_OK,
+                                                    resok4 = new OPEN4resok
+                                                    {
+                                                        stateid = new stateid4
+                                                        {
+                                                            seqid = 21,
+                                                            other = stateOther,
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                            new nfs_resop4
+                                            {
+                                                resop = nfs_opnum4.OP_READ,
+                                                opread = new READ4res
+                                                {
+                                                    status = nfsstat4.NFS4_OK,
+                                                    resok4 = new READ4resok
+                                                    {
+                                                        eof = true,
+                                                        data = readData,
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                    slotId: 2,
+                                    sequenceId: 3),
+                                operationsObservedSuccessfully: 3);
+
+                            if (!OpenNfsV41CompoundResultReaders.TryGetOpenStateId(result, out stateid4? stateid)
+                                || stateid is null
+                                || stateid.seqid != 21
+                                || stateid.other is not byte[] copiedOther
+                                || !copiedOther.SequenceEqual(stateOther))
+                            {
+                                throw new InvalidOperationException("TryGetOpenStateId must extract the successful OPEN stateid.");
+                            }
+
+                            if (!OpenNfsV41CompoundResultReaders.TryGetReadPayload(result, out OpenNfsV41ReadPayload? payload)
+                                || payload is null
+                                || !payload.EndOfFile
+                                || !payload.Data.SequenceEqual(readData))
+                            {
+                                throw new InvalidOperationException("TryGetReadPayload must extract the successful READ payload and EOF flag.");
+                            }
+
+                            stateid4 thrownStateId = OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow(result, "open-state");
+                            OpenNfsV41ReadPayload thrownPayload = OpenNfsV41CompoundResultReaders.GetReadPayloadOrThrow(result, "read-payload");
+                            if (thrownStateId.seqid != 21 || !thrownPayload.Data.SequenceEqual(readData))
+                            {
+                                throw new InvalidOperationException("Throwing readers must return the same decoded values on full success.");
+                            }
+
+                            stateOther[0] = 0;
+                            readData[0] = 0;
+                            if (stateid.other![0] != 9 || thrownStateId.other![0] != 9 || payload.Data[0] != 0x41 || thrownPayload.Data[0] != 0x41)
+                            {
+                                throw new InvalidOperationException("Result readers must defensively copy mutable stateid and READ payload arrays.");
+                            }
+
+                            _ = cancellationToken;
+                            return Task.CompletedTask;
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
+                        caseId: "CompoundResultReadersRejectMissingSuccessfulOps",
+                        displayName: "OpenNfsV41CompoundResultReaders return false or throw when a full-success COMPOUND does not contain the requested successful op",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: cancellationToken =>
+                        {
+                            OpenNfsV41CompoundResult result = OpenNfsV41CompoundResult.FullSuccess(
+                                new OpenNfsV41CompoundOutcome(
+                                    new COMPOUND4res
+                                    {
+                                        status = nfsstat4.NFS4_OK,
+                                        resarray = new[]
+                                        {
+                                            new nfs_resop4
+                                            {
+                                                resop = nfs_opnum4.OP_SEQUENCE,
+                                                opsequence = new SEQUENCE4res
+                                                {
+                                                    sr_status = nfsstat4.NFS4_OK,
+                                                },
+                                            },
+                                        },
+                                    },
+                                    slotId: 0,
+                                    sequenceId: 1),
+                                operationsObservedSuccessfully: 1);
+
+                            if (OpenNfsV41CompoundResultReaders.TryGetOpenStateId(result, out stateid4? stateid)
+                                || stateid is not null
+                                || OpenNfsV41CompoundResultReaders.TryGetReadPayload(result, out OpenNfsV41ReadPayload? payload)
+                                || payload is not null)
+                            {
+                                throw new InvalidOperationException("Try readers must return false when the requested successful op is absent.");
+                            }
+
+                            bool openThrowObserved = false;
+                            try
+                            {
+                                _ = OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow(result, "missing-open");
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                openThrowObserved = true;
+                            }
+
+                            bool readThrowObserved = false;
+                            try
+                            {
+                                _ = OpenNfsV41CompoundResultReaders.GetReadPayloadOrThrow(result, "missing-read");
+                            }
+                            catch (InvalidOperationException)
+                            {
+                                readThrowObserved = true;
+                            }
+
+                            if (!openThrowObserved || !readThrowObserved)
+                            {
+                                throw new InvalidOperationException("Throwing readers must fail when the requested successful op is absent.");
+                            }
+
+                            _ = cancellationToken;
                             return Task.CompletedTask;
                         }),
 
