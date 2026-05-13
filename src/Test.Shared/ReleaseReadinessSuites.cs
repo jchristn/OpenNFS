@@ -410,6 +410,13 @@ namespace Test.Shared
                         skip: !probe.IsAvailable,
                         skipReason: probe.SkipReason,
                         executeAsync: ExecutePackedClientPackageSurfacesNegativeResultsAgainstPeerMatrixAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ReleaseReadinessSuites",
+                        caseId: "PackedClientPackageExecutesAgainstPackedServerPackage",
+                        displayName: "A clean packaged OpenNFS.Client consumer mounts and mutates through a clean packaged OpenNFS.Server consumer",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
+                        executeAsync: ExecutePackedClientPackageExecutesAgainstPackedServerPackageAsync),
                 });
         }
 
@@ -985,6 +992,43 @@ namespace Test.Shared
             {
                 TryDeleteDirectory(sampleRoot);
                 TryDeleteDirectory(unfs3Root);
+            }
+        }
+
+        private static async Task ExecutePackedClientPackageExecutesAgainstPackedServerPackageAsync(CancellationToken cancellationToken)
+        {
+            await using PackedOpenNfsServerProcess server = await PackedOpenNfsServerProcess.StartAsync(
+                PackagedConsumerProgramSourceFactory.CreateServerApplicationProgramSource(denyMounts: false),
+                cancellationToken).ConfigureAwait(false);
+
+            string programSource = PackagedConsumerProgramSourceFactory.CreateClientAgainstPackedServerProgramSource(
+                "127.0.0.1",
+                server.MountPort,
+                server.NfsPort);
+
+            DotnetCommandResult result = await RunExternalPackageConsumerProjectAsync(
+                Path.Combine("src", "OpenNFS.Client", "OpenNFS.Client.csproj"),
+                "OpenNFS.Client",
+                programSource,
+                cancellationToken,
+                timeout: TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+
+            if (!result.StandardOutput.Contains("PACKAGE CLIENT TO PACKAGE SERVER OK", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Expected the clean packaged OpenNFS.Client consumer to complete an end-to-end flow against the clean packaged OpenNFS.Server consumer."
+                    + Environment.NewLine
+                    + "client stdout:"
+                    + Environment.NewLine
+                    + result.StandardOutput
+                    + Environment.NewLine
+                    + "client stderr:"
+                    + Environment.NewLine
+                    + result.StandardError
+                    + Environment.NewLine
+                    + "server output:"
+                    + Environment.NewLine
+                    + server.GetCombinedOutput());
             }
         }
 

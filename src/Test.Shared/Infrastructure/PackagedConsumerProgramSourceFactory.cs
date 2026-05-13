@@ -564,6 +564,76 @@ public static class Program
                 .Replace("__GANESHA_NFS40_PORT__", ganeshaNfs40Port.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
         }
 
+        public static string CreateClientAgainstPackedServerProgramSource(
+            string serverHost,
+            int serverMountPort,
+            int serverNfsPort)
+        {
+            string template = """
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using OpenNFS.Client;
+
+public static class Program
+{
+    public static async Task<int> Main()
+    {
+        CancellationToken cancellationToken = CancellationToken.None;
+
+        await using OpenNfsClient client = new OpenNfsClientBuilder()
+            .WithServer("__SERVER_HOST__", __SERVER_NFS_PORT__)
+            .WithMountPort(__SERVER_MOUNT_PORT__)
+            .WithUdpForNfsV3(true)
+            .Build();
+        await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+        IReadOnlyList<OpenNfsExportV3Entry> exports = await client.Exports.ListExportsV3Async(cancellationToken).ConfigureAwait(false);
+        if (!exports.Any(entry => string.Equals(entry.ExportPath, "/data", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Expected the packaged server export listing to include '/data'.");
+        }
+
+        await using OpenNfsMountSession session = await client.MountAsync("/data", cancellationToken).ConfigureAwait(false);
+
+        byte[] existingBytes = await session.Files.ReadAllBytesAsync("/hello.txt", cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(Encoding.UTF8.GetString(existingBytes), "hello-from-packed-server", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Expected the packaged client to read the packaged server seed file.");
+        }
+
+        const string createdPath = "/client-to-server.txt";
+        const string createdContents = "written-through-packaged-client-to-packaged-server";
+        await session.Directories.CreateFileAsync(createdPath, failIfExists: true, cancellationToken).ConfigureAwait(false);
+        await session.Files.WriteAllBytesAsync(
+            createdPath,
+            Encoding.UTF8.GetBytes(createdContents),
+            OpenNfsWriteStability.FileSync,
+            cancellationToken).ConfigureAwait(false);
+
+        byte[] roundTripBytes = await session.Files.ReadAllBytesAsync(createdPath, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(Encoding.UTF8.GetString(roundTripBytes), createdContents, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Expected the packaged client to read back the payload written through the packaged server.");
+        }
+
+        await session.Directories.DeleteFileAsync(createdPath, cancellationToken).ConfigureAwait(false);
+
+        Console.WriteLine("PACKAGE CLIENT TO PACKAGE SERVER OK");
+        return 0;
+    }
+}
+""";
+
+            return template
+                .Replace("__SERVER_HOST__", serverHost, StringComparison.Ordinal)
+                .Replace("__SERVER_MOUNT_PORT__", serverMountPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("__SERVER_NFS_PORT__", serverNfsPort.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        }
+
         public static string CreateServerApplicationProgramSource(bool denyMounts)
         {
             string mountAuthorizationLines = denyMounts
