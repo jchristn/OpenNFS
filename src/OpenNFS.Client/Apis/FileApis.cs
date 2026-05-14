@@ -19,10 +19,222 @@ namespace OpenNFS.Client.Apis
     public sealed class FileApis
     {
         private readonly OpenNfsClient _client;
+        private readonly OpenNfsFileV42Apis _v42Apis;
 
         internal FileApis(OpenNfsClient client)
         {
             _client = client;
+            _v42Apis = new OpenNfsFileV42Apis(client);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>IO_ADVISE</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42IoAdviseResult> IoAdviseV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong count,
+            IReadOnlyList<OpenNfsV42IoAdviceHint>? hints,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.IoAdviseV42Async(fileHandle, offset, count, hints, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>IO_ADVISE</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareIoAdviseV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong count,
+            IReadOnlyList<OpenNfsV42IoAdviceHint>? hints,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareIoAdviseV42Async(fileHandle, offset, count, hints, cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>READ_PLUS</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42ReadPlusResult> ReadPlusV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            uint count,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.ReadPlusV42Async(fileHandle, offset, count, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>READ_PLUS</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareReadPlusV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            uint count,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareReadPlusV42Async(fileHandle, offset, count, cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>SEEK</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42SeekResult> SeekV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            OpenNfsV42SeekTarget target,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.SeekV42Async(fileHandle, offset, target, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>SEEK</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareSeekV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            OpenNfsV42SeekTarget target,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareSeekV42Async(fileHandle, offset, target, cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>ALLOCATE</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42AllocateResult> AllocateV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong length,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.AllocateV42Async(fileHandle, offset, length, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>ALLOCATE</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareAllocateV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong length,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareAllocateV42Async(fileHandle, offset, length, cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>COPY</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42CopyResult> CopyV42Async(
+            byte[] sourceFileHandle,
+            byte[] destinationFileHandle,
+            ulong sourceOffset,
+            ulong destinationOffset,
+            ulong count,
+            bool consecutive,
+            bool synchronous,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.CopyV42Async(
+                sourceFileHandle,
+                destinationFileHandle,
+                sourceOffset,
+                destinationOffset,
+                count,
+                consecutive,
+                synchronous,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>COPY</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareCopyV42Async(
+            byte[] sourceFileHandle,
+            byte[] destinationFileHandle,
+            ulong sourceOffset,
+            ulong destinationOffset,
+            ulong count,
+            bool consecutive,
+            bool synchronous,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareCopyV42Async(
+                sourceFileHandle,
+                destinationFileHandle,
+                sourceOffset,
+                destinationOffset,
+                count,
+                consecutive,
+                synchronous,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>CLONE</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42CloneResult> CloneV42Async(
+            byte[] sourceFileHandle,
+            byte[] destinationFileHandle,
+            ulong sourceOffset,
+            ulong destinationOffset,
+            ulong count,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.CloneV42Async(
+                sourceFileHandle,
+                destinationFileHandle,
+                sourceOffset,
+                destinationOffset,
+                count,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>CLONE</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareCloneV42Async(
+            byte[] sourceFileHandle,
+            byte[] destinationFileHandle,
+            ulong sourceOffset,
+            ulong destinationOffset,
+            ulong count,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareCloneV42Async(
+                sourceFileHandle,
+                destinationFileHandle,
+                sourceOffset,
+                destinationOffset,
+                count,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an NFSv4.2 <c>DEALLOCATE</c> grouped-session flow and decodes the typed result.
+        /// </summary>
+        public Task<OpenNfsV42DeallocateResult> DeallocateV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong length,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.DeallocateV42Async(fileHandle, offset, length, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prepares an NFSv4.2 grouped <c>DEALLOCATE</c> COMPOUND plan.
+        /// </summary>
+        public Task<OpenNfsCompoundPlan> PrepareDeallocateV42Async(
+            byte[] fileHandle,
+            ulong offset,
+            ulong length,
+            CancellationToken cancellationToken)
+        {
+            return _v42Apis.PrepareDeallocateV42Async(fileHandle, offset, length, cancellationToken);
         }
 
         /// <summary>

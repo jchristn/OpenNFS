@@ -95,6 +95,13 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "InteropSuites",
+                        caseId: "OpenNfsClientEstablishesSessionAgainstOpenNfsServerOverNfs41",
+                        displayName: "OpenNFS.Client establishes an NFSv4.1 session and round-trips namespace and file ops against a live OpenNFS server host",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
+                        executeAsync: ExecuteClientAgainstOpenNfsServerOverNfs41Async),
+
+                    new TestCaseDescriptor(
+                        suiteId: "InteropSuites",
                         caseId: "OpenNfsClientReadsAndWritesAgainstLinuxNfs40Server",
                         displayName: "OpenNFS.Client browses, opens, writes, and commits against a real Linux NFSv4.0 server container",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
@@ -182,6 +189,15 @@ namespace Test.Shared
                         skip: !probe.IsAvailable,
                         skipReason: probe.SkipReason,
                         executeAsync: ExecuteLinuxClientAgainstOpenNfsServerAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "InteropSuites",
+                        caseId: "LinuxUserspaceLibNfsClientReadsAgainstOpenNfsServer",
+                        displayName: "A real libnfs userspace client lists and reads through an OpenNFS server host",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
+                        skip: !probe.IsAvailable,
+                        skipReason: probe.SkipReason,
+                        executeAsync: ExecuteLinuxUserspaceClientAgainstOpenNfsServerAsync),
 
                     new TestCaseDescriptor(
                         suiteId: "InteropSuites",
@@ -1626,7 +1642,7 @@ namespace Test.Shared
 
                 OpenNfsV41MountSession mountSession = session.CreateMountSession();
                 string exportRootPath = await ResolveLinuxExportRootPathV41Async(mountSession, cancellationToken).ConfigureAwait(false);
-                string[] exportRootNames = await ReadLinuxExportRootNamesV41Async(mountSession, exportRootPath, cancellationToken).ConfigureAwait(false);
+                string[] exportRootNames = await ReadDirectoryEntryNamesV41Async(mountSession, exportRootPath, cancellationToken).ConfigureAwait(false);
                 if (!exportRootNames.Contains("d", StringComparer.Ordinal)
                     || !exportRootNames.Contains("h.txt", StringComparer.Ordinal))
                 {
@@ -1766,6 +1782,252 @@ namespace Test.Shared
                     + Environment.NewLine
                     + logs,
                     exception);
+            }
+        }
+
+        private static async Task ExecuteClientAgainstOpenNfsServerOverNfs41Async(CancellationToken cancellationToken)
+        {
+            string rootDirectory = Path.Combine(Path.GetTempPath(), "OpenNFS.InteropV41", Guid.NewGuid().ToString("N"));
+            string exportRoot = Path.Combine(rootDirectory, "export");
+            string mappingPath = Path.Combine(rootDirectory, "handles.json");
+
+            try
+            {
+                Directory.CreateDirectory(exportRoot);
+                await File.WriteAllTextAsync(
+                    Path.Combine(exportRoot, "hello.txt"),
+                    "hello-from-v41-interop",
+                    cancellationToken).ConfigureAwait(false);
+
+                await using OpenNfsServerApplication application = new OpenNfsServerBuilder()
+                    .UseLocalFileSystem()
+                    .UseFileHandleProvider(new PersistentMappingHandleProvider(mappingPath))
+                    .AddExport("/data", exportRoot)
+                    .BuildApplication(
+                        new OpenNfsServerApplicationOptions
+                        {
+                            ListenerAddress = "127.0.0.1",
+                            EnableNfs41 = true,
+                            MountPort = 0,
+                            NfsPort = 0,
+                            Nfs40Port = 0,
+                            Nfs41Port = 0,
+                            NlmPort = 0,
+                            NsmPort = 0,
+                        });
+
+                await application.StartAsync(cancellationToken).ConfigureAwait(false);
+                if (application.Nfs41Port < 1)
+                {
+                    throw new InvalidOperationException("Expected the OpenNFS server host to expose a live NFSv4.1 listener.");
+                }
+
+                OpenNfsV41ClientSessionOptions options = new OpenNfsV41ClientSessionOptions(
+                    endpoint: new IPEndPoint(IPAddress.Loopback, application.Nfs41Port),
+                    clientOwner: BuildInteropV41ClientOwner());
+                options.RequestedSlots = 4;
+                options.ConnectTimeout = TimeSpan.FromSeconds(30);
+                options.CallTimeout = TimeSpan.FromSeconds(30);
+
+                await using OpenNfsV41ClientSession session = await OpenNfsV41ClientSession
+                    .EstablishAsync(options, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (session.SessionId.Count != 16
+                    || session.ClientId == 0
+                    || session.NegotiatedSlotCount == 0
+                    || session.ServerMinorId != 1
+                    || session.ServerMajorId.Count == 0
+                    || session.ServerScope.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the OpenNFS NFSv4.1 peer path to establish a usable session with populated server-owner metadata.");
+                }
+
+                await EnsureV41ReclaimCompleteAsync(session, cancellationToken).ConfigureAwait(false);
+
+                OpenNfsV41CompoundOutcome firstOutcome = await session.SendCompoundAsync(
+                    operations: Array.Empty<nfs_argop4>(),
+                    cacheReply: false,
+                    tag: "opennfs-v41-peer-1",
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (firstOutcome.Response.status != nfsstat4.NFS4_OK
+                    || firstOutcome.SlotId != 0
+                    || firstOutcome.SequenceId != 2)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the first post-RECLAIM_COMPLETE OpenNFS NFSv4.1 peer COMPOUND to succeed on slot 0 with sequenceid 2, but observed status "
+                        + firstOutcome.Response.status
+                        + ", slot "
+                        + firstOutcome.SlotId
+                        + ", sequenceid "
+                        + firstOutcome.SequenceId
+                        + ".");
+                }
+
+                OpenNfsV41CompoundOutcome secondOutcome = await session.SendCompoundAsync(
+                    operations: Array.Empty<nfs_argop4>(),
+                    cacheReply: false,
+                    tag: "opennfs-v41-peer-2",
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (secondOutcome.Response.status != nfsstat4.NFS4_OK
+                    || secondOutcome.SequenceId != 3)
+                {
+                    throw new InvalidOperationException(
+                        "Expected the second post-RECLAIM_COMPLETE OpenNFS NFSv4.1 peer COMPOUND to advance the per-slot sequenceid to 3, but observed status "
+                        + secondOutcome.Response.status
+                        + ", slot "
+                        + secondOutcome.SlotId
+                        + ", sequenceid "
+                        + secondOutcome.SequenceId
+                        + ".");
+                }
+
+                OpenNfsV41MountSession mountSession = session.CreateMountSession();
+                string exportRootPath = await ResolveOpenNfsExportRootPathV41Async(
+                    mountSession,
+                    exportLeafName: "data",
+                    seededFileName: "hello.txt",
+                    cancellationToken).ConfigureAwait(false);
+                string[] exportRootNames = await ReadDirectoryEntryNamesV41Async(
+                    mountSession,
+                    exportRootPath,
+                    cancellationToken).ConfigureAwait(false);
+                if (!exportRootNames.Contains("hello.txt", StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected the OpenNFS NFSv4.1 export root to expose the seeded 'hello.txt' entry.");
+                }
+
+                string seededFilePath = CombineV41Path(exportRootPath, "hello.txt");
+                OpenNfsV41CompoundResult getattrResult = await mountSession.Metadata
+                    .GetAttributesAsync(seededFilePath, cancellationToken)
+                    .ConfigureAwait(false);
+                EnsureSuccessfulV41GetAttributes(getattrResult, "OpenNFS NFSv4.1 GETATTR seeded file");
+
+                OpenNfsV41CompoundResult seededOpenResult = await WaitForV41OpenReadyAsync(
+                    token => mountSession.Files.OpenExistingAsync(
+                        seededFilePath,
+                        session.ClientId,
+                        "opennfs-v41-seeded-reader",
+                        1U,
+                        (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_READ,
+                        (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE,
+                        token),
+                    cancellationToken).ConfigureAwait(false);
+                stateid4 seededStateId = OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow(
+                    seededOpenResult,
+                    "OpenNFS NFSv4.1 OPEN existing seeded file");
+                OpenNfsV41CompoundResult seededReadResult = await mountSession.Files.ReadAsync(
+                    seededFilePath,
+                    seededStateId,
+                    offset: 0UL,
+                    count: 128U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV41ReadPayload seededPayload = OpenNfsV41CompoundResultReaders.GetReadPayloadOrThrow(
+                    seededReadResult,
+                    "OpenNFS NFSv4.1 READ seeded file");
+                if (!string.Equals(Encoding.UTF8.GetString(seededPayload.Data), "hello-from-v41-interop", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Expected the OpenNFS NFSv4.1 seeded file to preserve the interop payload.");
+                }
+
+                _ = (await mountSession.Files.CloseAsync(
+                    seededFilePath,
+                    seededStateId,
+                    2U,
+                    cancellationToken).ConfigureAwait(false)).GetOutcomeOrThrow("OpenNFS NFSv4.1 CLOSE seeded file");
+
+                string createdFilePath = CombineV41Path(
+                    exportRootPath,
+                    "v41-created-" + Guid.NewGuid().ToString("N") + ".txt");
+                byte[] writtenBytes = Encoding.UTF8.GetBytes("created-from-opennfs-v41-client");
+
+                OpenNfsV41CompoundResult createResult = await WaitForV41OpenReadyAsync(
+                    token => mountSession.Files.CreateAndOpenAsync(
+                        createdFilePath,
+                        session.ClientId,
+                        "opennfs-v41-writer",
+                        1U,
+                        (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_BOTH,
+                        (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE,
+                        createmode4.UNCHECKED4,
+                        token),
+                    cancellationToken).ConfigureAwait(false);
+                stateid4 createdStateId = OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow(
+                    createResult,
+                    "OpenNFS NFSv4.1 CREATE/OPEN created file");
+
+                _ = (await mountSession.Files.WriteAsync(
+                    createdFilePath,
+                    createdStateId,
+                    offset: 0UL,
+                    stable: stable_how4.FILE_SYNC4,
+                    data: writtenBytes,
+                    cancellationToken).ConfigureAwait(false)).GetOutcomeOrThrow("OpenNFS NFSv4.1 WRITE created file");
+
+                _ = (await mountSession.Files.CloseAsync(
+                    createdFilePath,
+                    createdStateId,
+                    2U,
+                    cancellationToken).ConfigureAwait(false)).GetOutcomeOrThrow("OpenNFS NFSv4.1 CLOSE created file");
+
+                OpenNfsV41CompoundResult verifyOpenResult = await WaitForV41OpenReadyAsync(
+                    token => mountSession.Files.OpenExistingAsync(
+                        createdFilePath,
+                        session.ClientId,
+                        "opennfs-v41-verifier",
+                        1U,
+                        (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_READ,
+                        (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE,
+                        token),
+                    cancellationToken).ConfigureAwait(false);
+                stateid4 verifyStateId = OpenNfsV41CompoundResultReaders.GetOpenStateIdOrThrow(
+                    verifyOpenResult,
+                    "OpenNFS NFSv4.1 OPEN created file for verification");
+                OpenNfsV41CompoundResult verifyReadResult = await mountSession.Files.ReadAsync(
+                    createdFilePath,
+                    verifyStateId,
+                    offset: 0UL,
+                    count: 4096U,
+                    cancellationToken).ConfigureAwait(false);
+                OpenNfsV41ReadPayload verifyPayload = OpenNfsV41CompoundResultReaders.GetReadPayloadOrThrow(
+                    verifyReadResult,
+                    "OpenNFS NFSv4.1 READ created file for verification");
+                if (!verifyPayload.Data.SequenceEqual(writtenBytes))
+                {
+                    throw new InvalidOperationException(
+                        "Expected the OpenNFS NFSv4.1 created file to round-trip the written payload.");
+                }
+
+                _ = (await mountSession.Files.CloseAsync(
+                    createdFilePath,
+                    verifyStateId,
+                    2U,
+                    cancellationToken).ConfigureAwait(false)).GetOutcomeOrThrow("OpenNFS NFSv4.1 CLOSE verification file");
+
+                _ = (await mountSession.Directories.RemoveAsync(
+                    createdFilePath,
+                    cancellationToken).ConfigureAwait(false)).GetOutcomeOrThrow("OpenNFS NFSv4.1 REMOVE created file");
+
+                OpenNfsV41CompoundResult missingAfterRemoveResult = await mountSession.Files.OpenExistingAsync(
+                    createdFilePath,
+                    session.ClientId,
+                    "opennfs-v41-post-remove",
+                    1U,
+                    (uint)Nfs41Constants.OPEN4_SHARE_ACCESS_READ,
+                    (uint)Nfs41Constants.OPEN4_SHARE_DENY_NONE,
+                    cancellationToken).ConfigureAwait(false);
+                if (!missingAfterRemoveResult.ReachedServer
+                    || !missingAfterRemoveResult.HasPartialResults
+                    || missingAfterRemoveResult.Outcome?.Response.status != nfsstat4.NFS4ERR_NOENT)
+                {
+                    throw new InvalidOperationException("Expected reopening the removed OpenNFS NFSv4.1 file to surface NFS4ERR_NOENT.");
+                }
+            }
+            finally
+            {
+                DeleteDirectoryIfPresent(rootDirectory);
             }
         }
 
@@ -2282,6 +2544,53 @@ namespace Test.Shared
             }
         }
 
+        private static async Task ExecuteLinuxUserspaceClientAgainstOpenNfsServerAsync(CancellationToken cancellationToken)
+        {
+            string mappingDirectory = CreateTempDirectory();
+
+            try
+            {
+                string sourceRoot = Path.Combine(@"C:\OpenNfsInterop", "Export");
+                OpenNfsServer server = CreateOpenNfsInteropServer(Path.Combine(mappingDirectory, "handles.json"), sourceRoot);
+
+                await using OpenNfsTcpInteropHost host = OpenNfsTcpInteropHost.Start(server);
+
+                DockerCommandResult result =
+                    await DockerLinuxUserspaceNfsClient.RunCommandAsync(
+                        CreateLinuxUserspaceReadCommand(host.MountPort, host.NfsPort),
+                        cancellationToken).ConfigureAwait(false);
+
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        "The libnfs userspace client container failed to list or read from the OpenNFS server."
+                        + Environment.NewLine
+                        + "stdout:"
+                        + Environment.NewLine
+                        + result.StandardOutput
+                        + Environment.NewLine
+                        + "stderr:"
+                        + Environment.NewLine
+                        + result.StandardError);
+                }
+
+                string combinedOutput = (result.StandardOutput + Environment.NewLine + result.StandardError).Trim();
+                if (!combinedOutput.Contains("hello-from-opennfs", StringComparison.Ordinal)
+                    || !combinedOutput.Contains("h.txt", StringComparison.Ordinal)
+                    || !combinedOutput.Contains("d/n.txt", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected the libnfs userspace client container to surface the OpenNFS export contents. Output was:"
+                        + Environment.NewLine
+                        + combinedOutput);
+                }
+            }
+            finally
+            {
+                DeleteDirectoryIfPresent(mappingDirectory);
+            }
+        }
+
         private static async Task ExecuteNegativeLinuxClientAgainstOpenNfsServerAsync(CancellationToken cancellationToken)
         {
             string mappingDirectory = CreateTempDirectory();
@@ -2701,6 +3010,17 @@ namespace Test.Shared
                 "umount /mnt/opennfs");
         }
 
+        private static string CreateLinuxUserspaceReadCommand(int mountPort, int nfsPort)
+        {
+            return string.Concat(
+                "set -eu; ",
+                "BASE='nfs://host.docker.internal/export?version=3&nfsport=", nfsPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "&mountport=", mountPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "'; ",
+                "nfs-ls -R \"$BASE\"; ",
+                "nfs-cat 'nfs://host.docker.internal/export/h.txt?version=3&nfsport=", nfsPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "&mountport=", mountPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "'");
+        }
+
         private static string CreateLinuxV40ReadWriteDeleteMountCommand(int nfs40Port)
         {
             return string.Concat(
@@ -2973,13 +3293,13 @@ namespace Test.Shared
                 ownerId: new byte[] { 0x49, 0x4E, 0x54, 0x45, 0x52, 0x4F, 0x50, 0x34, 0x31 });
         }
 
-        private static async Task<string[]> ReadLinuxExportRootNamesV41Async(
+        private static async Task<string[]> ReadDirectoryEntryNamesV41Async(
             OpenNfsV41MountSession mountSession,
-            string exportRootPath,
+            string directoryPath,
             CancellationToken cancellationToken)
         {
             OpenNfsV41CompoundResult listingResult = await mountSession.Directories.ListAsync(
-                exportRootPath,
+                directoryPath,
                 cookie: 0UL,
                 cookieVerifier: new byte[8],
                 dircount: 4096U,
@@ -2989,7 +3309,7 @@ namespace Test.Shared
 
             return ExtractV41DirectoryEntryNames(
                 listingResult,
-                "Linux NFSv4.1 READDIR " + exportRootPath)
+                "NFSv4.1 READDIR " + directoryPath)
                 .OrderBy(static name => name, StringComparer.Ordinal)
                 .ToArray();
         }
@@ -2998,7 +3318,7 @@ namespace Test.Shared
             OpenNfsV41MountSession mountSession,
             CancellationToken cancellationToken)
         {
-            string[] rootNames = await ReadLinuxExportRootNamesV41Async(
+            string[] rootNames = await ReadDirectoryEntryNamesV41Async(
                 mountSession,
                 "/",
                 cancellationToken).ConfigureAwait(false);
@@ -3016,6 +3336,35 @@ namespace Test.Shared
 
             throw new InvalidOperationException(
                 "Expected the Linux NFSv4.1 pseudo-root to expose either the export contents or an 'export' directory, but found: "
+                + string.Join(", ", rootNames)
+                + ".");
+        }
+
+        private static async Task<string> ResolveOpenNfsExportRootPathV41Async(
+            OpenNfsV41MountSession mountSession,
+            string exportLeafName,
+            string seededFileName,
+            CancellationToken cancellationToken)
+        {
+            string[] rootNames = await ReadDirectoryEntryNamesV41Async(
+                mountSession,
+                "/",
+                cancellationToken).ConfigureAwait(false);
+
+            if (rootNames.Contains(seededFileName, StringComparer.Ordinal))
+            {
+                return "/";
+            }
+
+            if (rootNames.Contains(exportLeafName, StringComparer.Ordinal))
+            {
+                return "/" + exportLeafName;
+            }
+
+            throw new InvalidOperationException(
+                "Expected the OpenNFS NFSv4.1 root to expose either the seeded file or export leaf '"
+                + exportLeafName
+                + "', but found: "
                 + string.Join(", ", rootNames)
                 + ".");
         }
@@ -3048,6 +3397,21 @@ namespace Test.Shared
             }
 
             return names;
+        }
+
+        private static void EnsureSuccessfulV41GetAttributes(
+            OpenNfsV41CompoundResult result,
+            string operationName)
+        {
+            OpenNfsV41CompoundOutcome outcome = result.GetOutcomeOrThrow(operationName);
+            nfs_resop4[] results = outcome.Response.resarray ?? Array.Empty<nfs_resop4>();
+            if (results.Length == 0
+                || results[results.Length - 1].resop != nfs_opnum4.OP_GETATTR
+                || results[results.Length - 1].opgetattr?.status != nfsstat4.NFS4_OK
+                || results[results.Length - 1].opgetattr?.resok4?.obj_attributes?.attrmask is null)
+            {
+                throw new InvalidOperationException(operationName + " completed without a successful GETATTR result.");
+            }
         }
 
         private static string CombineV41Path(string directoryPath, string entryName)

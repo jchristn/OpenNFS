@@ -192,7 +192,7 @@ function ConvertTo-InteropWindowsProcessArgument {
 function Ensure-LinuxClientInteropImage {
     param([string]$RepositoryRoot)
 
-    $image = "opennfs-test/linux-nfs-client:local-v2"
+    $image = "opennfs-test/linux-nfs-client:local-v4"
     try {
         $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
     }
@@ -599,6 +599,27 @@ function Resolve-PerlSuiteCommand {
         return "prove -r tests"
     }
 
+    if ([string]::Equals($Subset, "core", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $coreSubsets = @(
+            "chmod",
+            "mkdir",
+            "open",
+            "rename",
+            "rmdir",
+            "truncate",
+            "unlink"
+        )
+
+        foreach ($coreSubset in $coreSubsets) {
+            $coreSubsetDirectory = Join-Path $testsDirectory $coreSubset
+            if (-not (Test-Path $coreSubsetDirectory -PathType Container)) {
+                throw "The pjdfstest core subset expects '$coreSubsetDirectory' to exist."
+            }
+        }
+
+        return "prove -r " + (($coreSubsets | ForEach-Object { "tests/$_" }) -join " ")
+    }
+
     $subsetDirectory = Join-Path $testsDirectory $Subset
     if (Test-Path $subsetDirectory -PathType Container) {
         return "prove -r tests/$Subset"
@@ -632,12 +653,8 @@ function Resolve-CthonSuiteCommand {
         throw "Connectathon subset '$Subset' is not one of: $($validSubsets -join ', ')."
     }
 
-    $hasMakefile = (Test-Path (Join-Path $SuiteRoot "Makefile") -PathType Leaf) `
-        -or (Test-Path (Join-Path $SuiteRoot "Makefile.in") -PathType Leaf)
-    $buildPrefix = if ($hasMakefile) { "make && " } else { "" }
-
     if ([string]::Equals($Subset, "all", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return "${buildPrefix}./runtests -a"
+        return "make OS=Linux FSTYPE=nfs CFLAGS=""`$CFLAGS"" LIBS=""`$LIBS"" && ./runtests -a"
     }
 
     $subsetDirectory = Join-Path $SuiteRoot $Subset
@@ -645,7 +662,86 @@ function Resolve-CthonSuiteCommand {
         throw "Connectathon suite root '$SuiteRoot' is missing the '$Subset' subdirectory."
     }
 
-    return "${buildPrefix}./runtests -t $Subset"
+    switch ($Subset) {
+        "basic" {
+            return "make -C basic OS=Linux FSTYPE=nfs CFLAGS=""`$CFLAGS"" LIBS=""`$LIBS"" && ./runtests -b -f"
+        }
+        "general" {
+            return "rm -rf ""`$NFSTESTDIR"" && mkdir -p ""`$NFSTESTDIR"" && for source in general/*; do name=`$(basename ""`$source""); if [ -f ""`$source"" ]; then if [ ""`$name"" = ""Makefile"" ]; then sed -e 's/cp large.c large1.c/cat large.c > large1.c/' -e 's/cp large.c large2.c/cat large.c > large2.c/' -e 's/cp large.c large3.c/cat large.c > large3.c/' -e 's/if test ! -x runtests; then chmod a+x runtests; fi/: # OpenNFS harness skips exec-bit chmod/' ""`$source"" > ""`$NFSTESTDIR""/""`$name""; elif [ ""`$name"" = ""runtests.wrk"" ]; then sed -e 's/^chmod 777 large4.sh mkdummy rmdummy$/: # OpenNFS harness skips exec-bit chmod/' -e 's#\./large4\.sh#sh ./large4.sh#g' -e 's#^mkdummy$#sh ./mkdummy#' -e 's#^rmdummy$#sh ./rmdummy#' -e 's#\./stat #/lib/ld-musl-x86_64.so.1 ./stat #g' -e 's#> nroff.tbl#> /tmp/nroff.tbl#g' -e 's#< nroff.tbl#< /tmp/nroff.tbl#g' -e 's#> nroff.out#> /tmp/nroff.out#g' -e 's#rm nroff.out nroff.tbl#rm -f /tmp/nroff.out /tmp/nroff.tbl#g' ""`$source"" > ""`$NFSTESTDIR""/""`$name""; else cat ""`$source"" > ""`$NFSTESTDIR""/""`$name""; fi; fi; done && cd ""`$NFSTESTDIR"" && sh runtests"
+        }
+        "special" {
+            return "make -C basic subr.o OS=Linux FSTYPE=nfs CFLAGS=""`$CFLAGS"" LIBS=""`$LIBS"" && make -C special OS=Linux FSTYPE=nfs CFLAGS=""`$CFLAGS"" LIBS=""`$LIBS"" && ./runtests -s"
+        }
+        "lock" {
+            return "make -C lock OS=Linux FSTYPE=nfs CFLAGS=""`$CFLAGS"" && ./runtests -l"
+        }
+    }
+
+    throw "Connectathon subset '$Subset' is not mapped to a runtests invocation."
+}
+
+function Get-DefaultPynfsV40TestCodes {
+    return @(
+        "ROOT1",
+        "LOOKDIR",
+        "LOOKFILE",
+        "LOOK1",
+        "LOOK2",
+        "LOOK3",
+        "LOOK5r",
+        "GF1d",
+        "GF1r",
+        "GF9",
+        "RD1",
+        "RD3",
+        "RD5",
+        "RD6",
+        "RD7d",
+        "RD8",
+        "MKDIR",
+        "CR7",
+        "CR8",
+        "CR9",
+        "CR10",
+        "OPEN5",
+        "OPEN6",
+        "OPEN7d",
+        "OPEN8",
+        "OPEN10",
+        "OPEN12",
+        "CLOSE2",
+        "RM1d",
+        "RM2r",
+        "RM3",
+        "RM4",
+        "RM6",
+        "RDDR1",
+        "RDDR5r",
+        "RDDR6",
+        "RDDR7",
+        "SEC1",
+        "SEC2",
+        "SEC3",
+        "SEC4",
+        "SEC5",
+        "ACC1r",
+        "ACC1d",
+        "ACC3",
+        "ACC4r",
+        "ACC4d"
+    )
+}
+
+function Get-DefaultPynfsV41TestCodes {
+    return @(
+        "EID1",
+        "EID2",
+        "CSESS1",
+        "CSESS3",
+        "SEQ1",
+        "SEQ2",
+        "SEQ5"
+    )
 }
 
 function Resolve-PynfsCommand {
@@ -654,6 +750,7 @@ function Resolve-PynfsCommand {
         [int]$MinorVersion,
         [string]$EntryPoint,
         [string[]]$EntryPointArguments,
+        [string[]]$TestCodes,
         [string]$ServerHost,
         [string]$ServerPort,
         [string]$ExportPath,
@@ -663,6 +760,9 @@ function Resolve-PynfsCommand {
     if ([string]::IsNullOrWhiteSpace($EntryPoint)) {
         if ($MinorVersion -eq 0) {
             $EntryPoint = "nfs4.0/testserver.py"
+        }
+        elseif ($MinorVersion -eq 1) {
+            $EntryPoint = "nfs4.1/testserver.py"
         }
         else {
             throw "An explicit -EntryPoint must be supplied for pynfs execution."
@@ -679,6 +779,10 @@ function Resolve-PynfsCommand {
             throw "ServerHost, ServerPort, and ExportPath are required when using the default real pynfs NFSv4.0 invocation."
         }
 
+        if (-not $TestCodes -or $TestCodes.Count -eq 0) {
+            $TestCodes = Get-DefaultPynfsV40TestCodes
+        }
+
         $EntryPointArguments = @(
             "nfs://${ServerHost}:$ServerPort$ExportPath",
             "--minorversion",
@@ -688,14 +792,34 @@ function Resolve-PynfsCommand {
             "--rundeps",
             "--jsonout",
             $ResultsJsonPath,
-            "-v",
-            "ROOT1",
-            "LOOKFILE",
-            "GF1r",
-            "GF9",
-            "RD1",
-            "RD8"
+            "-v"
         )
+
+        $EntryPointArguments += $TestCodes
+    }
+    elseif ((-not $EntryPointArguments -or $EntryPointArguments.Count -eq 0) -and [string]::Equals($EntryPoint, "nfs4.1/testserver.py", [System.StringComparison]::Ordinal)) {
+        if ([string]::IsNullOrWhiteSpace($ServerHost) -or [string]::IsNullOrWhiteSpace($ServerPort) -or [string]::IsNullOrWhiteSpace($ExportPath)) {
+            throw "ServerHost, ServerPort, and ExportPath are required when using the default real pynfs NFSv4.1 invocation."
+        }
+
+        if (-not $TestCodes -or $TestCodes.Count -eq 0) {
+            $TestCodes = Get-DefaultPynfsV41TestCodes
+        }
+
+        $EntryPointArguments = @(
+            "nfs://${ServerHost}:$ServerPort$ExportPath",
+            "--minorversion",
+            "1",
+            "--security",
+            "sys",
+            "--noinit",
+            "--nocleanup",
+            "--jsonout",
+            $ResultsJsonPath,
+            "-v"
+        )
+
+        $EntryPointArguments += $TestCodes
     }
 
     $quotedArguments = @("python3", "./$EntryPoint")
@@ -767,6 +891,8 @@ function Invoke-MountedSuiteContainer {
 
     $suiteRootPath = [System.IO.Path]::GetFullPath($SuiteRoot)
     $resultsRootPath = Ensure-InteropDirectory $ResultsDirectory
+    $runtimeSuiteRoot = "/tmp/mounted-suite"
+    $mountedTestDirectory = "$MountPoint/opennfs-conformance"
 
     $mountOptions = if ($ProtocolVersion -eq "NfsV3") {
         "vers=3,proto=tcp,mountproto=tcp,port=$NfsPort,mountport=$MountPort,nolock,soft,timeo=10,retrans=1"
@@ -774,6 +900,55 @@ function Invoke-MountedSuiteContainer {
     else {
         "vers=4,minorversion=0,proto=tcp,port=$NfsPort,soft,timeo=10,retrans=1"
     }
+
+    $bootstrapCommand = @"
+rm -rf "$runtimeSuiteRoot"
+mkdir -p "$runtimeSuiteRoot"
+cp -R /suite/. "$runtimeSuiteRoot"
+
+if [ -f "$runtimeSuiteRoot/runtests" ]; then
+  chmod +x "$runtimeSuiteRoot/runtests" || true
+fi
+if [ -f "$runtimeSuiteRoot/runcthon" ]; then
+  chmod +x "$runtimeSuiteRoot/runcthon" || true
+fi
+find "$runtimeSuiteRoot" -path '*/runtests' -type f -exec chmod +x {} \; >/dev/null 2>&1 || true
+
+if [ -f "$runtimeSuiteRoot/configure.ac" ] && [ -f "$runtimeSuiteRoot/pjdfstest.c" ]; then
+  cd "$runtimeSuiteRoot"
+  autoreconf -ifs > /results/bootstrap-stdout.log 2> /results/bootstrap-stderr.log
+  ./configure >> /results/bootstrap-stdout.log 2>> /results/bootstrap-stderr.log
+  make pjdfstest >> /results/bootstrap-stdout.log 2>> /results/bootstrap-stderr.log
+elif [ -f "$runtimeSuiteRoot/runtests" ] && [ -f "$runtimeSuiteRoot/Makefile" ]; then
+  cd "$runtimeSuiteRoot"
+  if [ -f ./tests.init.sh ]; then
+    sh ./tests.init.sh nfs Linux > /results/bootstrap-stdout.log 2> /results/bootstrap-stderr.log
+    CFLAGS="-DLINUX -DHAVE_SOCKLEN_T -DGLIBC=22 -DMMAP -DSTDARG -I/usr/include/tirpc"
+    LIBS="-ltirpc"
+    CC=gcc
+    mkdir -p /tmp/connectathon-tools
+    cat <<'EOF' > /tmp/connectathon-tools/cp
+#!/bin/sh
+exec /bin/busybox cp "$@"
+EOF
+    chmod +x /tmp/connectathon-tools/cp
+    PATH="/tmp/connectathon-tools:`$PATH"
+    printf '%s\n' '# OpenNFS interop runtime overrides for Alpine/musl.' >> ./tests.init
+    printf '%s\n' 'PATH=/tmp/connectathon-tools:`$PATH' >> ./tests.init
+    printf '%s\n' 'CC=gcc' >> ./tests.init
+    printf '%s\n' 'CFLAGS="-DLINUX -DHAVE_SOCKLEN_T -DGLIBC=22 -DMMAP -DSTDARG -I/usr/include/tirpc"' >> ./tests.init
+    printf '%s\n' 'LIBS="-ltirpc"' >> ./tests.init
+    export CC
+    export CFLAGS LIBS PATH
+  else
+    : > /results/bootstrap-stdout.log
+    : > /results/bootstrap-stderr.log
+  fi
+else
+  : > /results/bootstrap-stdout.log
+  : > /results/bootstrap-stderr.log
+fi
+"@
 
     $shellCommand = @"
 set -eu
@@ -787,8 +962,10 @@ export OPENNFS_MOUNT_POINT="$MountPoint"
 export OPENNFS_SERVER_HOST="$ServerHost"
 export OPENNFS_EXPORT_PATH="$ExportPath"
 export OPENNFS_PROTOCOL_VERSION="$ProtocolVersion"
-cd /suite
-$SuiteCommand > /results/stdout.log 2> /results/stderr.log
+export NFSTESTDIR="$mountedTestDirectory"
+$bootstrapCommand
+cd "$runtimeSuiteRoot"
+( $SuiteCommand ) > /results/stdout.log 2> /results/stderr.log
 "@
 
     return Invoke-LinuxClientContainer `

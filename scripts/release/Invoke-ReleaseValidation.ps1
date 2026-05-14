@@ -70,7 +70,7 @@ $externalPlans = @(
     "pwsh ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /export -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest",
     "pwsh ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /export -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon",
     "pwsh ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot scripts/interop/pynfs/external -UseSampleServer",
-    "pwsh ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -UseLinuxNfs41Server"
+    "pwsh ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -SuiteRoot scripts/interop/pynfs/external -UseLinuxNfs41Server"
 )
 
 if ($PlanOnly) {

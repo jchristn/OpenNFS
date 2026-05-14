@@ -11,6 +11,7 @@ namespace OpenNFS.Client
         private readonly OpenNfsEndpoint[] _AlternateEndpoints;
         private readonly OpenNfsEndpoint[] _CandidateEndpoints;
         private readonly OpenNfsEndpoint? _ExplicitMountEndpoint;
+        private readonly OpenNfsRpcSecGssOptions? _RpcSecGssOptions;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="OpenNfsClientSettings"/> class.
@@ -73,6 +74,11 @@ namespace OpenNFS.Client
         /// Optional client-side owner and owner-group normalization policy for NFSv4 identity helpers.
         /// Default value: <see cref="OpenNfsPassthroughIdentityPolicy.Default"/>.
         /// </param>
+        /// <param name="rpcSecGssOptions">
+        /// Optional RPCSEC_GSS client options used when <paramref name="authenticationFlavor"/> is
+        /// <see cref="OpenNfsAuthenticationFlavor.RpcSecGss"/>.
+        /// Default value: <c>null</c>.
+        /// </param>
         /// <exception cref="ArgumentException">Thrown when <paramref name="serverHost"/> is empty or whitespace.</exception>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when a numeric or timeout value is outside its supported range.</exception>
         public OpenNfsClientSettings(
@@ -88,7 +94,8 @@ namespace OpenNFS.Client
             OpenNfsEndpointSelectionMode endpointSelectionMode = OpenNfsEndpointSelectionMode.PrimaryOnly,
             OpenNfsRetryPolicy? retryPolicy = null,
             OpenNfsEndpoint? mountEndpoint = null,
-            IOpenNfsClientIdentityPolicy? identityPolicy = null)
+            IOpenNfsClientIdentityPolicy? identityPolicy = null,
+            OpenNfsRpcSecGssOptions? rpcSecGssOptions = null)
         {
             if (string.IsNullOrWhiteSpace(serverHost))
             {
@@ -128,6 +135,7 @@ namespace OpenNFS.Client
             EndpointSelectionMode = endpointSelectionMode;
             RetryPolicy = retryPolicy ?? new OpenNfsRetryPolicy();
             IdentityPolicy = identityPolicy ?? OpenNfsPassthroughIdentityPolicy.Default;
+            _RpcSecGssOptions = rpcSecGssOptions;
             _AlternateEndpoints = CopyAlternateEndpoints(alternateEndpoints, PrimaryEndpoint);
             _CandidateEndpoints = BuildCandidateEndpoints(PrimaryEndpoint, _AlternateEndpoints, EndpointSelectionMode);
         }
@@ -236,6 +244,17 @@ namespace OpenNFS.Client
         /// Gets the configured client-side owner and owner-group normalization policy.
         /// </summary>
         public IOpenNfsClientIdentityPolicy IdentityPolicy { get; }
+
+        /// <summary>
+        /// Gets the configured RPCSEC_GSS client options, if any.
+        /// </summary>
+        public OpenNfsRpcSecGssOptions? RpcSecGssOptions
+        {
+            get
+            {
+                return _RpcSecGssOptions;
+            }
+        }
 
         private static OpenNfsEndpoint[] CopyAlternateEndpoints(IReadOnlyCollection<OpenNfsEndpoint>? alternateEndpoints, OpenNfsEndpoint primaryEndpoint)
         {

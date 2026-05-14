@@ -22,6 +22,13 @@ namespace OpenNFS.Protocol.V40.State
         private readonly Dictionary<string, OpenStateRecord> _statesByToken = new Dictionary<string, OpenStateRecord>(StringComparer.Ordinal);
         private readonly Dictionary<string, LockStateRecord> _lockStatesByToken = new Dictionary<string, LockStateRecord>(StringComparer.Ordinal);
         private readonly List<Nfs40ExpiredLockCleanup> _pendingExpiredLockCleanups = new List<Nfs40ExpiredLockCleanup>();
+        private readonly Nfs40ClientRegistry _clients;
+        private readonly Nfs40DelegationRegistry _delegations;
+        private readonly Nfs40LockRegistry _locks;
+        private readonly Nfs40OpenRegistry _opens;
+        private readonly Nfs40StateLockOperations _lockOperations;
+        private readonly Nfs40StateOpenOperations _openOperations;
+        private readonly Nfs40StateValidationSupport _validation;
         private DateTimeOffset? _gracePeriodEndsUtc;
         private ulong _nextClientId = 1UL;
         private ulong _nextConfirmToken = 1UL;
@@ -53,6 +60,30 @@ namespace OpenNFS.Protocol.V40.State
             _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
             _leaseWindow = resolvedLeaseWindow;
             _gracePeriodDuration = resolvedGracePeriodDuration;
+            _opens = new Nfs40OpenRegistry();
+            _locks = new Nfs40LockRegistry(_lockStatesByToken);
+            _delegations = new Nfs40DelegationRegistry(_opens, _lockStatesByToken);
+            _clients = new Nfs40ClientRegistry(_leaseWindow, _opens, _locks, _delegations);
+            _validation = new Nfs40StateValidationSupport(this);
+            _openOperations = new Nfs40StateOpenOperations(this);
+            _lockOperations = new Nfs40StateLockOperations(this);
+        }
+
+        internal Nfs40ClientRegistry Clients => _clients;
+
+        internal Nfs40DelegationRegistry Delegations => _delegations;
+
+        internal Nfs40LockRegistry Locks => _locks;
+
+        internal Nfs40OpenRegistry Opens => _opens;
+
+        internal object SyncRoot => _syncRoot;
+
+        internal Nfs40StateValidationSupport Validation => _validation;
+
+        internal byte[] AllocateStateTokenUnlocked()
+        {
+            return CreateStateTokenUnlocked(_nextStateToken++);
         }
 
         internal Nfs40ClientRegistrationResult RegisterClient(
@@ -353,12 +384,12 @@ namespace OpenNFS.Protocol.V40.State
 
                 if (!clientRecord.OpenOwners.TryGetValue(ownerKey, out OpenOwnerRecord? ownerRecord))
                 {
-                    if (sequenceId.Value != 1U)
+                    if (!IsValidInitialOpenOwnerSequenceId(sequenceId.Value))
                     {
                         return new Nfs40OpenStateTransitionResult(nfsstat4.NFS4ERR_BAD_SEQID);
                     }
 
-                    ownerRecord = new OpenOwnerRecord(clientRecord, ownerKey, ownerBytes);
+                    ownerRecord = new OpenOwnerRecord(clientRecord, ownerKey, ownerBytes, sequenceId.Value);
                     clientRecord.OpenOwners.Add(ownerKey, ownerRecord);
                 }
 
@@ -1052,17 +1083,17 @@ namespace OpenNFS.Protocol.V40.State
             }
         }
 
-        private static bool IsValidShareAccess(uint shareAccess)
+        internal static bool IsValidShareAccess(uint shareAccess)
         {
             return shareAccess is 1U or 2U or 3U;
         }
 
-        private static bool IsValidShareDeny(uint shareDeny)
+        internal static bool IsValidShareDeny(uint shareDeny)
         {
             return (shareDeny & ~3U) == 0U;
         }
 
-        private DateTimeOffset GetUtcNow()
+        internal DateTimeOffset GetUtcNow()
         {
             return _utcNow();
         }
@@ -1072,12 +1103,12 @@ namespace OpenNFS.Protocol.V40.State
             return now - client.LastRenewUtc > _leaseWindow;
         }
 
-        private static byte[] CloneBytes(byte[] bytes)
+        internal static byte[] CloneBytes(byte[] bytes)
         {
             return bytes.AsSpan().ToArray();
         }
 
-        private static stateid4 CreateStateId(uint sequenceId, byte[] token)
+        internal static stateid4 CreateStateId(uint sequenceId, byte[] token)
         {
             return new stateid4
             {
@@ -1091,13 +1122,18 @@ namespace OpenNFS.Protocol.V40.State
             return left.AsSpan().SequenceEqual(right);
         }
 
+        private static bool IsValidInitialOpenOwnerSequenceId(uint sequenceId)
+        {
+            return sequenceId == 0U || sequenceId == 1U;
+        }
+
         private static bool DeniesRead(uint shareDeny) => (shareDeny & (uint)Nfs40Constants.OPEN4_SHARE_DENY_READ) != 0U;
 
         private static bool DeniesWrite(uint shareDeny) => (shareDeny & (uint)Nfs40Constants.OPEN4_SHARE_DENY_WRITE) != 0U;
 
         private static bool Reads(uint shareAccess) => (shareAccess & (uint)Nfs40Constants.OPEN4_SHARE_ACCESS_READ) != 0U;
 
-        private static bool Writes(uint shareAccess) => (shareAccess & (uint)Nfs40Constants.OPEN4_SHARE_ACCESS_WRITE) != 0U;
+        internal static bool Writes(uint shareAccess) => (shareAccess & (uint)Nfs40Constants.OPEN4_SHARE_ACCESS_WRITE) != 0U;
 
         private static byte[] CreateVerifierUnlocked(ulong token)
         {
@@ -1297,7 +1333,7 @@ namespace OpenNFS.Protocol.V40.State
             };
         }
 
-        private bool IsGracePeriodActiveUnlocked(DateTimeOffset now)
+        internal bool IsGracePeriodActiveUnlocked(DateTimeOffset now)
         {
             if (!_gracePeriodEndsUtc.HasValue)
             {
@@ -1352,7 +1388,7 @@ namespace OpenNFS.Protocol.V40.State
             }
         }
 
-        private void CleanupExpiredClientsUnlocked(DateTimeOffset now)
+        internal void CleanupExpiredClientsUnlocked(DateTimeOffset now)
         {
             if (_clientsById.Count == 0)
             {
@@ -1409,12 +1445,12 @@ namespace OpenNFS.Protocol.V40.State
             string ownerKey = Convert.ToHexString(ownerBytes);
             if (!clientRecord.OpenOwners.TryGetValue(ownerKey, out ownerRecord))
             {
-                if (sequenceId != 1U)
+                if (!IsValidInitialOpenOwnerSequenceId(sequenceId))
                 {
                     return nfsstat4.NFS4ERR_BAD_SEQID;
                 }
 
-                ownerRecord = new OpenOwnerRecord(clientRecord, ownerKey, ownerBytes);
+                ownerRecord = new OpenOwnerRecord(clientRecord, ownerKey, ownerBytes, sequenceId);
                 clientRecord.OpenOwners.Add(ownerKey, ownerRecord);
             }
 
@@ -1585,7 +1621,7 @@ namespace OpenNFS.Protocol.V40.State
             return nfsstat4.NFS4_OK;
         }
 
-        private void RemoveClientUnlocked(ClientRecord client)
+        internal void RemoveClientUnlocked(ClientRecord client)
         {
             foreach (string stateKey in client.DelegationStateKeys)
             {
@@ -1678,485 +1714,5 @@ namespace OpenNFS.Protocol.V40.State
             return nfsstat4.NFS4_OK;
         }
 
-        internal sealed class Nfs40ClientRegistrationResult
-        {
-            internal Nfs40ClientRegistrationResult(
-                nfsstat4 status,
-                ulong clientId = 0UL,
-                byte[]? confirmationVerifier = null)
-            {
-                Status = status;
-                ClientId = clientId;
-                ConfirmationVerifier = confirmationVerifier is null
-                    ? Array.Empty<byte>()
-                    : confirmationVerifier.AsSpan().ToArray();
-            }
-
-            internal ulong ClientId { get; }
-
-            internal byte[] ConfirmationVerifier { get; }
-
-            internal nfsstat4 Status { get; }
-        }
-
-        internal sealed class Nfs40OpenStateTransitionResult
-        {
-            internal Nfs40OpenStateTransitionResult(
-                nfsstat4 status,
-                stateid4? stateId = null,
-                bool requiresConfirmation = false,
-                IReadOnlyList<Nfs40DelegationRecallInfo>? recallRequests = null)
-            {
-                Status = status;
-                StateId = stateId;
-                RequiresConfirmation = requiresConfirmation;
-                RecallRequests = recallRequests ?? Array.Empty<Nfs40DelegationRecallInfo>();
-            }
-
-            internal IReadOnlyList<Nfs40DelegationRecallInfo> RecallRequests { get; }
-
-            internal bool RequiresConfirmation { get; }
-
-            internal stateid4? StateId { get; }
-
-            internal nfsstat4 Status { get; }
-        }
-
-        internal sealed class Nfs40DelegationTransitionResult
-        {
-            internal Nfs40DelegationTransitionResult(nfsstat4 status, Nfs40DelegationState? delegationState = null)
-            {
-                Status = status;
-                DelegationState = delegationState;
-            }
-
-            internal Nfs40DelegationState? DelegationState { get; }
-
-            internal nfsstat4 Status { get; }
-        }
-
-        internal sealed class Nfs40DelegationRecallInfo
-        {
-            internal Nfs40DelegationRecallInfo(
-                string fileKey,
-                ulong clientId,
-                NfsDelegationKind delegationKind,
-                stateid4 stateId)
-            {
-                FileKey = fileKey;
-                ClientId = clientId;
-                DelegationKind = delegationKind;
-                StateId = stateId;
-            }
-
-            internal ulong ClientId { get; }
-
-            internal NfsDelegationKind DelegationKind { get; }
-
-            internal string FileKey { get; }
-
-            internal stateid4 StateId { get; }
-        }
-
-        internal sealed class Nfs40DelegationState
-        {
-            internal Nfs40DelegationState(
-                stateid4 stateId,
-                NfsDelegationKind delegationKind,
-                bool recallRequested,
-                string fileKey,
-                ulong clientId)
-            {
-                StateId = stateId;
-                DelegationKind = delegationKind;
-                RecallRequested = recallRequested;
-                FileKey = fileKey;
-                ClientId = clientId;
-            }
-
-            internal ulong ClientId { get; }
-
-            internal NfsDelegationKind DelegationKind { get; }
-
-            internal string FileKey { get; }
-
-            internal bool RecallRequested { get; }
-
-            internal stateid4 StateId { get; }
-        }
-
-        internal sealed class Nfs40LockPreparationResult
-        {
-            internal Nfs40LockPreparationResult(
-                nfsstat4 status,
-                Nfs40PendingLockOperation? pendingOperation = null)
-            {
-                Status = status;
-                PendingOperation = pendingOperation;
-            }
-
-            internal Nfs40PendingLockOperation? PendingOperation { get; }
-
-            internal nfsstat4 Status { get; }
-        }
-
-        internal sealed class Nfs40LockTransitionResult
-        {
-            internal Nfs40LockTransitionResult(nfsstat4 status, stateid4? stateId = null)
-            {
-                Status = status;
-                StateId = stateId;
-            }
-
-            internal stateid4? StateId { get; }
-
-            internal nfsstat4 Status { get; }
-        }
-
-        internal sealed class Nfs40ExpiredLockCleanup
-        {
-            internal Nfs40ExpiredLockCleanup(
-                NfsFileHandleTarget target,
-                ulong clientId,
-                byte[] ownerBytes,
-                ulong offset,
-                ulong length,
-                bool exclusive)
-            {
-                Target = new NfsFileHandleTarget(target.ExportPath, target.SourcePath, target.StableIdentity);
-                ClientId = clientId;
-                OwnerBytes = CloneBytes(ownerBytes);
-                Offset = offset;
-                Length = length;
-                Exclusive = exclusive;
-            }
-
-            internal ulong ClientId { get; }
-
-            internal bool Exclusive { get; }
-
-            internal ulong Length { get; }
-
-            internal ulong Offset { get; }
-
-            internal byte[] OwnerBytes { get; }
-
-            internal NfsFileHandleTarget Target { get; }
-        }
-
-        internal sealed class Nfs40PendingLockOperation
-        {
-            internal Nfs40PendingLockOperation(
-                ClientRecord client,
-                OpenStateRecord openState,
-                string fileKey,
-                byte[] ownerBytes,
-                string ownerKey,
-                LockOwnerRecord? existingLockOwner,
-                LockStateRecord? existingLockState,
-                bool consumesOpenSequenceId)
-            {
-                Client = client;
-                OpenState = openState;
-                FileKey = fileKey;
-                OwnerBytes = CloneBytes(ownerBytes);
-                OwnerKey = ownerKey;
-                ExistingLockOwner = existingLockOwner;
-                ExistingLockState = existingLockState;
-                ConsumesOpenSequenceId = consumesOpenSequenceId;
-                ClientId = client.ClientId;
-            }
-
-            internal ClientRecord Client { get; }
-
-            internal ulong ClientId { get; }
-
-            internal bool ConsumesOpenSequenceId { get; }
-
-            internal LockOwnerRecord? ExistingLockOwner { get; }
-
-            internal LockStateRecord? ExistingLockState { get; }
-
-            internal string FileKey { get; }
-
-            internal bool Exclusive { get; set; }
-
-            internal ulong Length { get; set; }
-
-            internal OpenStateRecord OpenState { get; }
-
-            internal ulong Offset { get; set; }
-
-            internal byte[] OwnerBytes { get; }
-
-            internal string OwnerKey { get; }
-
-            internal NfsFileHandleTarget? Target { get; set; }
-        }
-
-        internal sealed class ClientRecord
-        {
-            internal ClientRecord(ulong clientId, string identityKey, byte[] identityBytes, DateTimeOffset lastRenewUtc)
-            {
-                ClientId = clientId;
-                IdentityKey = identityKey;
-                IdentityBytes = CloneBytes(identityBytes);
-                DelegationStateKeys = new HashSet<string>(StringComparer.Ordinal);
-                LockOwners = new Dictionary<string, LockOwnerRecord>(StringComparer.Ordinal);
-                OpenOwners = new Dictionary<string, OpenOwnerRecord>(StringComparer.Ordinal);
-                LockStateKeys = new HashSet<string>(StringComparer.Ordinal);
-                StateKeys = new HashSet<string>(StringComparer.Ordinal);
-                LastRenewUtc = lastRenewUtc;
-            }
-
-            internal uint CallbackIdent { get; set; }
-
-            internal string CallbackAddress { get; set; } = string.Empty;
-
-            internal string CallbackNetId { get; set; } = string.Empty;
-
-            internal uint CallbackProgram { get; set; }
-
-            internal ulong ClientId { get; }
-
-            internal byte[] ClientVerifier { get; set; } = Array.Empty<byte>();
-
-            internal byte[]? CurrentConfirmVerifier { get; set; }
-
-            internal HashSet<string> DelegationStateKeys { get; }
-
-            internal string IdentityKey { get; }
-
-            internal byte[] IdentityBytes { get; }
-
-            internal bool IsConfirmed { get; set; }
-
-            internal DateTimeOffset LastRenewUtc { get; set; }
-
-            internal HashSet<string> LockStateKeys { get; }
-
-            internal Dictionary<string, LockOwnerRecord> LockOwners { get; }
-
-            internal Dictionary<string, OpenOwnerRecord> OpenOwners { get; }
-
-            internal HashSet<string> StateKeys { get; }
-        }
-
-        internal sealed class ReclaimOpenRecord
-        {
-            internal ReclaimOpenRecord(
-                ulong clientId,
-                string ownerKey,
-                string fileKey,
-                uint shareAccess,
-                uint shareDeny)
-            {
-                ClientId = clientId;
-                OwnerKey = ownerKey;
-                FileKey = fileKey;
-                ShareAccess = shareAccess;
-                ShareDeny = shareDeny;
-            }
-
-            internal ulong ClientId { get; }
-
-            internal string FileKey { get; }
-
-            internal string OwnerKey { get; }
-
-            internal uint ShareAccess { get; }
-
-            internal uint ShareDeny { get; }
-        }
-
-        internal sealed class ReclaimLockRecord
-        {
-            internal ReclaimLockRecord(ulong clientId, string ownerKey, string fileKey)
-            {
-                ClientId = clientId;
-                OwnerKey = ownerKey;
-                FileKey = fileKey;
-            }
-
-            internal ulong ClientId { get; }
-
-            internal string FileKey { get; }
-
-            internal string OwnerKey { get; }
-        }
-
-        internal sealed class LockOwnerRecord
-        {
-            internal LockOwnerRecord(ClientRecord client, string ownerKey, byte[] ownerBytes)
-            {
-                Client = client;
-                OwnerKey = ownerKey;
-                OwnerBytes = CloneBytes(ownerBytes);
-                StateKeys = new HashSet<string>(StringComparer.Ordinal);
-            }
-
-            internal ClientRecord Client { get; }
-
-            internal uint NextExpectedSequenceId { get; set; } = 1U;
-
-            internal byte[] OwnerBytes { get; }
-
-            internal string OwnerKey { get; }
-
-            internal HashSet<string> StateKeys { get; }
-        }
-
-        internal sealed class OpenOwnerRecord
-        {
-            internal OpenOwnerRecord(ClientRecord client, string ownerKey, byte[] ownerBytes)
-            {
-                Client = client;
-                OwnerKey = ownerKey;
-                OwnerBytes = CloneBytes(ownerBytes);
-            }
-
-            internal ClientRecord Client { get; }
-
-            internal uint NextExpectedSequenceId { get; set; } = 1U;
-
-            internal byte[] OwnerBytes { get; }
-
-            internal string OwnerKey { get; }
-        }
-
-        internal sealed class OpenStateRecord
-        {
-            internal OpenStateRecord(
-                byte[] token,
-                string fileKey,
-                OpenOwnerRecord owner,
-                uint shareAccess,
-                uint shareDeny,
-                bool requiresConfirmation)
-            {
-                Token = CloneBytes(token);
-                TokenKey = Convert.ToHexString(token);
-                FileKey = fileKey;
-                Owner = owner;
-                ShareAccess = shareAccess;
-                ShareDeny = shareDeny;
-                RequiresConfirmation = requiresConfirmation;
-                DelegationStateKeys = new HashSet<string>(StringComparer.Ordinal);
-                LockStateKeys = new HashSet<string>(StringComparer.Ordinal);
-            }
-
-            internal HashSet<string> DelegationStateKeys { get; }
-
-            internal string FileKey { get; }
-
-            internal HashSet<string> LockStateKeys { get; }
-
-            internal OpenOwnerRecord Owner { get; }
-
-            internal bool RequiresConfirmation { get; set; }
-
-            internal uint ShareAccess { get; set; }
-
-            internal uint ShareDeny { get; set; }
-
-            internal uint StateSequenceId { get; set; } = 1U;
-
-            internal byte[] Token { get; }
-
-            internal string TokenKey { get; }
-
-            internal stateid4 CreateStateId()
-            {
-                return Nfs40StateManager.CreateStateId(StateSequenceId, Token);
-            }
-        }
-
-        internal sealed class DelegationStateRecord
-        {
-            internal DelegationStateRecord(
-                byte[] token,
-                string fileKey,
-                OpenStateRecord openState,
-                NfsDelegationKind kind)
-            {
-                Token = CloneBytes(token);
-                TokenKey = Convert.ToHexString(token);
-                FileKey = fileKey;
-                OpenState = openState;
-                Kind = kind;
-            }
-
-            internal string FileKey { get; }
-
-            internal NfsDelegationKind Kind { get; }
-
-            internal OpenStateRecord OpenState { get; }
-
-            internal OpenOwnerRecord Owner => OpenState.Owner;
-
-            internal bool RecallRequested { get; set; }
-
-            internal uint StateSequenceId { get; set; } = 1U;
-
-            internal byte[] Token { get; }
-
-            internal string TokenKey { get; }
-
-            internal stateid4 CreateStateId()
-            {
-                return Nfs40StateManager.CreateStateId(StateSequenceId, Token);
-            }
-        }
-
-        internal sealed class LockStateRecord
-        {
-            internal LockStateRecord(
-                byte[] token,
-                string fileKey,
-                NfsFileHandleTarget target,
-                ulong offset,
-                ulong length,
-                bool exclusive,
-                OpenStateRecord openState,
-                LockOwnerRecord owner)
-            {
-                Token = CloneBytes(token);
-                TokenKey = Convert.ToHexString(token);
-                FileKey = fileKey;
-                Target = new NfsFileHandleTarget(target.ExportPath, target.SourcePath, target.StableIdentity);
-                Offset = offset;
-                Length = length;
-                Exclusive = exclusive;
-                OpenState = openState;
-                Owner = owner;
-            }
-
-            internal bool Exclusive { get; }
-
-            internal string FileKey { get; }
-
-            internal bool HasActiveLocks { get; set; } = true;
-
-            internal ulong Length { get; }
-
-            internal ulong Offset { get; }
-
-            internal OpenStateRecord OpenState { get; }
-
-            internal LockOwnerRecord Owner { get; }
-
-            internal uint StateSequenceId { get; set; } = 1U;
-
-            internal NfsFileHandleTarget Target { get; }
-
-            internal byte[] Token { get; }
-
-            internal string TokenKey { get; }
-
-            internal stateid4 CreateStateId()
-            {
-                return Nfs40StateManager.CreateStateId(StateSequenceId, Token);
-            }
-        }
     }
 }

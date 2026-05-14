@@ -16,6 +16,7 @@ namespace Test.Automated
         {
             string? resultsPath = null;
             List<string> requestedSuites = new List<string>();
+            List<string> requestedCases = new List<string>();
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -29,6 +30,13 @@ namespace Test.Automated
                 if (string.Equals(args[i], "--suite", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
                     requestedSuites.Add(args[i + 1]);
+                    i++;
+                    continue;
+                }
+
+                if (string.Equals(args[i], "--case", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    requestedCases.Add(args[i + 1]);
                     i++;
                 }
             }
@@ -44,18 +52,67 @@ namespace Test.Automated
 
             CancellationToken cancellationToken = CancellationToken.None;
             return await ConsoleRunner.RunAsync(
-                FilterSuites(requestedSuites),
+                FilterSuites(requestedSuites, requestedCases),
                 resultsPath: resultsPath,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        private static IReadOnlyList<TestSuiteDescriptor> FilterSuites(IReadOnlyList<string> requestedSuites)
+        private static IReadOnlyList<TestSuiteDescriptor> FilterSuites(
+            IReadOnlyList<string> requestedSuites,
+            IReadOnlyList<string> requestedCases)
         {
-            if (requestedSuites.Count == 0)
+            IReadOnlyList<TestSuiteDescriptor> suites = requestedSuites.Count == 0
+                ? OpenNfsSuites.All
+                : FilterSuitesById(requestedSuites);
+
+            if (requestedCases.Count == 0)
             {
-                return OpenNfsSuites.All;
+                return suites;
             }
 
+            HashSet<string> requestedCaseIds = new HashSet<string>(requestedCases, StringComparer.OrdinalIgnoreCase);
+            List<TestSuiteDescriptor> filteredSuites = new List<TestSuiteDescriptor>();
+            HashSet<string> matchedCases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (TestSuiteDescriptor suite in suites)
+            {
+                List<TestCaseDescriptor> filteredCases = suite.Cases
+                    .Where(testCase => requestedCaseIds.Contains(testCase.CaseId) || requestedCaseIds.Contains(testCase.TestId))
+                    .ToList();
+
+                if (filteredCases.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (TestCaseDescriptor testCase in filteredCases)
+                {
+                    matchedCases.Add(testCase.CaseId);
+                    matchedCases.Add(testCase.TestId);
+                }
+
+                filteredSuites.Add(new TestSuiteDescriptor(
+                    suiteId: suite.SuiteId,
+                    displayName: suite.DisplayName,
+                    cases: filteredCases,
+                    beforeSuiteAsync: suite.BeforeSuiteAsync,
+                    afterSuiteAsync: suite.AfterSuiteAsync));
+            }
+
+            IEnumerable<string> missingCases = requestedCaseIds
+                .Where(requestedCaseId => !matchedCases.Contains(requestedCaseId));
+
+            if (missingCases.Any())
+            {
+                throw new InvalidOperationException(
+                    "Unknown Touchstone case id(s): " + string.Join(", ", missingCases) + ".");
+            }
+
+            return filteredSuites;
+        }
+
+        private static IReadOnlyList<TestSuiteDescriptor> FilterSuitesById(IReadOnlyList<string> requestedSuites)
+        {
             HashSet<string> requestedIds = new HashSet<string>(requestedSuites, StringComparer.OrdinalIgnoreCase);
             List<TestSuiteDescriptor> filteredSuites = OpenNfsSuites.All
                 .Where(suite => requestedIds.Contains(suite.SuiteId))

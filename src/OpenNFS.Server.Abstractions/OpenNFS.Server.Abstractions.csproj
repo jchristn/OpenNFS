@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Capability and request/response abstractions shared between the OpenNFS server and protocol extensions.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\OpenNFS.Server\Abstractions\Capabilities\INfsCopyClone.cs" Link="Abstractions\Capabilities\INfsCopyClone.cs" />
+    <Compile Include="..\OpenNFS.Server\Abstractions\Capabilities\INfsSparse.cs" Link="Abstractions\Capabilities\INfsSparse.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsAllocateRequest.cs" Link="Requests\NfsAllocateRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsCloneRequest.cs" Link="Requests\NfsCloneRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsCopyRequest.cs" Link="Requests\NfsCopyRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsDeallocateRequest.cs" Link="Requests\NfsDeallocateRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsReadSparseRequest.cs" Link="Requests\NfsReadSparseRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Requests\NfsSeekRequest.cs" Link="Requests\NfsSeekRequest.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsAllocateResponse.cs" Link="Responses\NfsAllocateResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsCloneResponse.cs" Link="Responses\NfsCloneResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsCopyResponse.cs" Link="Responses\NfsCopyResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsDeallocateResponse.cs" Link="Responses\NfsDeallocateResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsReadSparseResponse.cs" Link="Responses\NfsReadSparseResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\Responses\NfsSeekResponse.cs" Link="Responses\NfsSeekResponse.cs" />
+    <Compile Include="..\OpenNFS.Server\NfsSparseExtent.cs" Link="NfsSparseExtent.cs" />
+    <Compile Include="..\OpenNFS.Server\NfsSparseExtentKind.cs" Link="NfsSparseExtentKind.cs" />
+  </ItemGroup>
+</Project>

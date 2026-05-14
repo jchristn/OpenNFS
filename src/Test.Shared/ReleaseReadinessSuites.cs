@@ -406,9 +406,9 @@ namespace Test.Shared
                                 || !selfHostedWorkflow.Contains("$env:PJDFSTEST_ROOT", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:CONNECTATHON_ROOT", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:PYNFS_ROOT", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("$env:PYNFS41_ENTRYPOINT", StringComparison.Ordinal)
+                                || !selfHostedWorkflow.Contains("scripts/interop/pynfs/external", StringComparison.Ordinal)
                                 || !pynfsWorkflow.Contains("$env:PYNFS_ENTRYPOINT", StringComparison.Ordinal)
-                                || !pynfsWorkflow.Contains("$env:PYNFS41_ENTRYPOINT", StringComparison.Ordinal)
+                                || !pynfsWorkflow.Contains("scripts/interop/pynfs/external", StringComparison.Ordinal)
                                 || !pynfsWorkflow.Contains("-UseLinuxNfs41Server", StringComparison.Ordinal))
                             {
                                 throw new InvalidOperationException("Expected the workflow files to reference the new release-validation and conformance harness scripts.");
@@ -457,6 +457,15 @@ namespace Test.Shared
                         displayName: "A clean packaged OpenNFS.Client consumer mounts and mutates through a clean packaged OpenNFS.Server consumer",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
                         executeAsync: ExecutePackedClientPackageExecutesAgainstPackedServerPackageAsync),
+
+                    new TestCaseDescriptor(
+                        suiteId: "ReleaseReadinessSuites",
+                        caseId: "PackedClientPackageExecutesAgainstPackedServerPackageOverDockerNetwork",
+                        displayName: "A clean packaged OpenNFS.Client consumer mounts and mutates through a Docker-separated clean packaged OpenNFS.Server consumer",
+                        tags: new List<string> { TestCategories.Interop, TestCategories.Automated },
+                        skip: !probe.IsAvailable,
+                        skipReason: probe.SkipReason,
+                        executeAsync: ExecutePackedClientPackageExecutesAgainstPackedServerPackageOverDockerNetworkAsync),
                 });
         }
 
@@ -1108,6 +1117,11 @@ namespace Test.Shared
                     + Environment.NewLine
                     + server.GetCombinedOutput());
             }
+        }
+
+        private static Task ExecutePackedClientPackageExecutesAgainstPackedServerPackageOverDockerNetworkAsync(CancellationToken cancellationToken)
+        {
+            return ReleaseReadinessPackagingSupport.ExecutePackedClientPackageExecutesAgainstPackedServerPackageOverDockerNetworkAsync(cancellationToken);
         }
 
         private static void CreateLinuxServerExportLayout(string exportDirectory)

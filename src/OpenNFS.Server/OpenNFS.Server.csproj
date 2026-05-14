@@ -14,6 +14,7 @@
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeInternalRuntimeBuildOutputInPackage</TargetsForTfmSpecificBuildOutput>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="Internal\V42\**\*.cs" />
     <None Include="..\..\LICENSE.md" Pack="true" PackagePath="" Link="LICENSE.md" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" Link="README.md" />
   </ItemGroup>
@@ -22,10 +23,13 @@
          consumers can opt their host into RPCSEC_GSS. The project reference gives the
          server source access to the abstraction at compile time; SuppressDependenciesWhenPacking
          keeps OpenNFS.Rpc out of the public package's transitive NuGet dependencies. -->
+    <ProjectReference Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
     <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
+    <InternalRuntimeProject Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
+    <InternalRuntimeProject Include="..\OpenNFS.Protocol.V42\OpenNFS.Protocol.V42.csproj" />
   </ItemGroup>
   <Target Name="BuildInternalRuntimeProjectsForPackage" Condition="'$(NoBuild)' != 'true'">
     <MSBuild Projects="@(InternalRuntimeProject)"
@@ -40,6 +44,10 @@
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V3\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V3.xml" Condition="Exists('..\OpenNFS.Protocol.V3\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V3.xml')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.dll" Condition="Exists('..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.dll')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.xml" Condition="Exists('..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.xml')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.dll" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.dll')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml')" />
     </ItemGroup>
   </Target>
 </Project>

@@ -16,6 +16,7 @@ namespace OpenNFS.Client
         private IOpenNfsClientIdentityPolicy _IdentityPolicy = OpenNfsPassthroughIdentityPolicy.Default;
         private string? _MountServerHost;
         private int? _MountServerPort;
+        private OpenNfsRpcSecGssOptions? _RpcSecGssOptions;
         private OpenNfsRetryPolicy _RetryPolicy = new OpenNfsRetryPolicy();
         private TimeSpan _ResponseTimeout = TimeSpan.FromSeconds(30);
         private string _ServerHost = "localhost";
@@ -249,6 +250,35 @@ namespace OpenNFS.Client
         }
 
         /// <summary>
+        /// Configures RPCSEC_GSS client options and promotes RPCSEC_GSS as the active authentication flavor.
+        /// </summary>
+        /// <param name="options">Immutable RPCSEC_GSS client options.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
+        public OpenNfsClientBuilder WithRpcSecGss(OpenNfsRpcSecGssOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(options);
+            _RpcSecGssOptions = options;
+            _AuthenticationFlavor = OpenNfsAuthenticationFlavor.RpcSecGss;
+            return this;
+        }
+
+        /// <summary>
+        /// Configures Kerberos-backed RPCSEC_GSS client options and promotes RPCSEC_GSS as the active authentication flavor.
+        /// </summary>
+        /// <param name="targetSpn">Kerberos target SPN in canonical form.</param>
+        /// <param name="targetName">Optional NegotiateAuthentication target name.</param>
+        /// <param name="service">Requested RPCSEC_GSS service level.</param>
+        /// <returns>The current builder instance.</returns>
+        public OpenNfsClientBuilder WithRpcSecGssKerberos(
+            string targetSpn,
+            string? targetName = null,
+            OpenNfsRpcGssService service = OpenNfsRpcGssService.None)
+        {
+            return WithRpcSecGss(new OpenNfsRpcSecGssOptions(targetSpn, targetName, service));
+        }
+
+        /// <summary>
         /// Sets the AUTH_SYS identity values used when <see cref="OpenNfsAuthenticationFlavor.AuthSys"/> is selected.
         /// Calling this method also promotes AUTH_SYS as the active authentication flavor.
         /// </summary>
@@ -343,7 +373,8 @@ namespace OpenNFS.Client
                 endpointSelectionMode: _EndpointSelectionMode,
                 retryPolicy: _RetryPolicy,
                 mountEndpoint: ResolveMountEndpoint(),
-                identityPolicy: _IdentityPolicy);
+                identityPolicy: _IdentityPolicy,
+                rpcSecGssOptions: _RpcSecGssOptions);
         }
 
         /// <summary>

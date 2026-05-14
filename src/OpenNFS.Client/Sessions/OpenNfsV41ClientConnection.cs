@@ -47,6 +47,10 @@ namespace OpenNFS.Client.Sessions
 
         internal IPEndPoint RemoteEndpoint => (IPEndPoint)tcpClient.Client.RemoteEndPoint!;
 
+        internal OpenNfsAuthenticationFlavor AuthenticationFlavor => authenticationFlavor;
+
+        internal OpenNfsAuthSysCredentials AuthSysCredentials => authSysCredentials;
+
         internal static async Task<OpenNfsV41ClientConnection> ConnectAsync(
             IPEndPoint endpoint,
             TimeSpan connectTimeout,

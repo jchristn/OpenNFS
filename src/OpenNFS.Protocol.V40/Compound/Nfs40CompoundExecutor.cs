@@ -50,7 +50,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
         private async Task ReleaseExpiredLocksAsync(CancellationToken cancellationToken)
         {
-            IReadOnlyList<Nfs40StateManager.Nfs40ExpiredLockCleanup> expiredLockCleanups =
+            IReadOnlyList<Nfs40ExpiredLockCleanup> expiredLockCleanups =
                 _stateManager.DrainExpiredLockCleanups();
             if (expiredLockCleanups.Count == 0 || _server.Capabilities.Locking is null)
             {
@@ -59,7 +59,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             for (int index = 0; index < expiredLockCleanups.Count; index++)
             {
-                Nfs40StateManager.Nfs40ExpiredLockCleanup cleanup = expiredLockCleanups[index];
+                Nfs40ExpiredLockCleanup cleanup = expiredLockCleanups[index];
                 NfsLockRequest unlockRequest = CreateHostLockRequest(
                     NfsLockOperation.Unlock,
                     cleanup.Target,
@@ -1129,18 +1129,18 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateGetAttrResult(nfsstat4.NFS4ERR_NOTSUPP);
             }
 
-            (fattr4? attributes, nfsstat4 errorStatus) =
+            TryCreateAttributesResult attributeResult =
                 await Nfs40AttributeEncoder.TryCreateAttributesAsync(
                     _server,
                     refreshedHandle,
                     arguments.attr_request,
                     cancellationToken).ConfigureAwait(false);
-            if (attributes is null)
+            if (attributeResult.Attributes is null)
             {
-                return CreateGetAttrResult(errorStatus);
+                return CreateGetAttrResult(attributeResult.ErrorStatus);
             }
 
-            return CreateGetAttrResult(nfsstat4.NFS4_OK, attributes);
+            return CreateGetAttrResult(nfsstat4.NFS4_OK, attributeResult.Attributes);
         }
 
         private Nfs40CompoundOperationResult HandleGetFileHandle(Nfs40CompoundState state)
@@ -1499,7 +1499,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             string fileKey = BuildOpenFileKey(refreshedHandle.Target.ExportPath, refreshedHandle.Target.SourcePath);
-            Nfs40StateManager.Nfs40LockPreparationResult preparation;
+            Nfs40LockPreparationResult preparation;
             if (arguments.locker.new_lock_owner)
             {
                 open_to_lock_owner4? openOwner = arguments.locker.open_owner;
@@ -1557,7 +1557,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
             if (response.Disposition == NfsLockDisposition.Granted)
             {
-                Nfs40StateManager.Nfs40LockTransitionResult transition =
+                Nfs40LockTransitionResult transition =
                     _stateManager.CommitLockGranted(preparation.PendingOperation);
                 return CreateLockResult(
                     transition.Status,
@@ -1691,7 +1691,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             string fileKey = BuildOpenFileKey(refreshedHandle.Target.ExportPath, refreshedHandle.Target.SourcePath);
-            Nfs40StateManager.Nfs40LockPreparationResult preparation =
+            Nfs40LockPreparationResult preparation =
                 _stateManager.PrepareUnlock(arguments.lock_stateid, arguments.seqid, fileKey);
             if (preparation.Status != nfsstat4.NFS4_OK || preparation.PendingOperation is null)
             {
@@ -1716,7 +1716,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateLockUnlockResult(MapLockDisposition(response.Disposition));
             }
 
-            Nfs40StateManager.Nfs40LockTransitionResult transition =
+            Nfs40LockTransitionResult transition =
                 _stateManager.CommitUnlock(preparation.PendingOperation);
             return CreateLockUnlockResult(transition.Status, transition.StateId);
         }
@@ -1831,7 +1831,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateCloseResult(nfsstat4.NFS4ERR_BADXDR);
             }
 
-            Nfs40StateManager.Nfs40OpenStateTransitionResult transition =
+            Nfs40OpenStateTransitionResult transition =
                 _stateManager.CloseOpen(arguments.open_stateid, arguments.seqid);
             return CreateCloseResult(transition.Status, transition.StateId);
         }
@@ -1985,7 +1985,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateOpenResult(nfsstat4.NFS4ERR_BADXDR);
             }
 
-            Nfs40StateManager.Nfs40OpenStateTransitionResult transition;
+            Nfs40OpenStateTransitionResult transition;
             NfsPathInfo beforeChangePathInfo = refreshedHandle.PathInfo;
             NfsPathInfo afterChangePathInfo = beforeChangePathInfo;
             Nfs40CompoundResolvedHandle? openedHandle = null;
@@ -2014,7 +2014,7 @@ namespace OpenNFS.Protocol.V40.Compound
                         if (validationStatus == nfsstat4.NFS4ERR_DELAY
                             && _server.Capabilities.Delegations is not null)
                         {
-                            IReadOnlyList<Nfs40StateManager.Nfs40DelegationRecallInfo> recallRequests =
+                            IReadOnlyList<Nfs40DelegationRecallInfo> recallRequests =
                                 _stateManager.GetConflictingDelegationRecalls(
                                     fileKey,
                                     arguments.owner?.clientid?.Value ?? 0UL,
@@ -2199,7 +2199,7 @@ namespace OpenNFS.Protocol.V40.Compound
                             && openedHandle is not null
                             && _server.Capabilities.Delegations is not null)
                         {
-                            IReadOnlyList<Nfs40StateManager.Nfs40DelegationRecallInfo> recallRequests =
+                            IReadOnlyList<Nfs40DelegationRecallInfo> recallRequests =
                                 transition.RecallRequests.Count > 0
                                     ? transition.RecallRequests
                                     : _stateManager.GetConflictingDelegationRecalls(
@@ -2297,7 +2297,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
                 if (delegationDecision.DelegationKind != NfsDelegationKind.None)
                 {
-                    Nfs40StateManager.Nfs40DelegationTransitionResult delegationTransition =
+                    Nfs40DelegationTransitionResult delegationTransition =
                         _stateManager.TryGrantDelegation(transition.StateId, delegationDecision.DelegationKind);
                     if (delegationTransition.Status != nfsstat4.NFS4_OK)
                     {
@@ -2334,7 +2334,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateOpenConfirmResult(nfsstat4.NFS4ERR_BADXDR);
             }
 
-            Nfs40StateManager.Nfs40OpenStateTransitionResult transition =
+            Nfs40OpenStateTransitionResult transition =
                 _stateManager.ConfirmOpen(arguments.open_stateid, arguments.seqid);
             return CreateOpenConfirmResult(
                 transition.Status,
@@ -2354,7 +2354,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateOpenDowngradeResult(nfsstat4.NFS4ERR_BADXDR);
             }
 
-            Nfs40StateManager.Nfs40OpenStateTransitionResult transition =
+            Nfs40OpenStateTransitionResult transition =
                 _stateManager.DowngradeOpen(
                     arguments.open_stateid,
                     arguments.seqid,
@@ -2407,7 +2407,7 @@ namespace OpenNFS.Protocol.V40.Compound
             string fileKey = BuildOpenFileKey(
                 refreshedHandle.Target.ExportPath,
                 refreshedHandle.Target.SourcePath);
-            Nfs40StateManager.Nfs40DelegationTransitionResult transition =
+            Nfs40DelegationTransitionResult transition =
                 _stateManager.ReturnDelegation(arguments.deleg_stateid, fileKey);
             if (transition.Status != nfsstat4.NFS4_OK)
             {
@@ -2437,7 +2437,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 return CreateSetClientIdResult(nfsstat4.NFS4ERR_BADXDR);
             }
 
-            Nfs40StateManager.Nfs40ClientRegistrationResult registration =
+            Nfs40ClientRegistrationResult registration =
                 _stateManager.RegisterClient(arguments.client, arguments.callback, arguments.callback_ident);
             return CreateSetClientIdResult(
                 registration.Status,
@@ -3392,7 +3392,7 @@ namespace OpenNFS.Protocol.V40.Compound
             };
         }
 
-        private static open_delegation4 CreateDelegation(Nfs40StateManager.Nfs40DelegationState delegationState)
+        private static open_delegation4 CreateDelegation(Nfs40DelegationState delegationState)
         {
             return delegationState.DelegationKind switch
             {
@@ -3524,19 +3524,19 @@ namespace OpenNFS.Protocol.V40.Compound
                 return createResult(refreshStatus);
             }
 
-            (fattr4? actualAttributes, nfsstat4 actualStatus) =
+            TryCreateAttributesResult attributeResult =
                 await Nfs40AttributeEncoder.TryCreateAttributesAsync(
                     _server,
                     refreshedHandle,
                     requestedAttributes!.attrmask,
                     cancellationToken).ConfigureAwait(false);
-            if (actualAttributes is null)
+            if (attributeResult.Attributes is null)
             {
-                return createResult(actualStatus);
+                return createResult(attributeResult.ErrorStatus);
             }
 
             byte[] expectedBytes = requestedAttributes.attr_vals?.Value ?? Array.Empty<byte>();
-            byte[] actualBytes = actualAttributes.attr_vals?.Value ?? Array.Empty<byte>();
+            byte[] actualBytes = attributeResult.Attributes.attr_vals?.Value ?? Array.Empty<byte>();
             return createResult(CompareVerifiedAttributes(expectedBytes, actualBytes, expectMatch));
         }
 
@@ -3626,18 +3626,19 @@ namespace OpenNFS.Protocol.V40.Compound
             Nfs40CompoundResolvedHandle childHandle =
                 new Nfs40CompoundResolvedHandle(childFileHandle, childTarget, directoryEntry.PathInfo);
 
-            (fattr4? attributes, nfsstat4 errorStatus) =
+            TryCreateAttributesResult attributeResult =
                 await Nfs40AttributeEncoder.TryCreateAttributesAsync(
                     _server,
                     childHandle,
                     attributeRequest,
                     cancellationToken).ConfigureAwait(false);
-            if (attributes is null)
+            if (attributeResult.Attributes is null)
             {
                 throw new InvalidDataException(
-                    "Unable to encode requested READDIR attributes due to status " + errorStatus.ToString() + ".");
+                    "Unable to encode requested READDIR attributes due to status " + attributeResult.ErrorStatus.ToString() + ".");
             }
 
+            fattr4 attributes = attributeResult.Attributes;
             return new entry4
             {
                 cookie = new nfs_cookie4
@@ -3693,7 +3694,7 @@ namespace OpenNFS.Protocol.V40.Compound
         }
 
         private async Task NotifyDelegationRecallsAsync(
-            IReadOnlyList<Nfs40StateManager.Nfs40DelegationRecallInfo> recallRequests,
+            IReadOnlyList<Nfs40DelegationRecallInfo> recallRequests,
             string exportPath,
             string sourcePath,
             CancellationToken cancellationToken)
@@ -3705,7 +3706,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             for (int index = 0; index < recallRequests.Count; index++)
             {
-                Nfs40StateManager.Nfs40DelegationRecallInfo recall = recallRequests[index];
+                Nfs40DelegationRecallInfo recall = recallRequests[index];
                 await _server.Capabilities.Delegations.RecallDelegationAsync(
                     new NfsRecallDelegationRequest(
                         exportPath,

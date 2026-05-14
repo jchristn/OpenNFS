@@ -26,7 +26,9 @@ namespace Test.Shared.Infrastructure
             Task standardErrorTask,
             int mountPort,
             int nfsPort,
-            int nfs40Port)
+            int nfs40Port,
+            int nfs41Port,
+            int nfs42Port)
         {
             _project = project;
             _process = process;
@@ -37,6 +39,8 @@ namespace Test.Shared.Infrastructure
             MountPort = mountPort;
             NfsPort = nfsPort;
             Nfs40Port = nfs40Port;
+            Nfs41Port = nfs41Port;
+            Nfs42Port = nfs42Port;
         }
 
         internal int MountPort { get; }
@@ -44,6 +48,10 @@ namespace Test.Shared.Infrastructure
         internal int NfsPort { get; }
 
         internal int Nfs40Port { get; }
+
+        internal int Nfs41Port { get; }
+
+        internal int Nfs42Port { get; }
 
         internal static async Task<PackedOpenNfsServerProcess> StartAsync(
             string programSource,
@@ -109,8 +117,8 @@ namespace Test.Shared.Infrastructure
                     throw new InvalidOperationException("The dotnet CLI could not be started for the packed OpenNFS server consumer process.", exception);
                 }
 
-                TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port)> readyTcs =
-                    new TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port)>(TaskCreationOptions.RunContinuationsAsynchronously);
+                TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port, int Nfs41Port, int Nfs42Port)> readyTcs =
+                    new TaskCompletionSource<(int MountPort, int NfsPort, int Nfs40Port, int Nfs41Port, int Nfs42Port)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                 StringBuilder standardOutput = new StringBuilder();
                 StringBuilder standardError = new StringBuilder();
@@ -120,9 +128,15 @@ namespace Test.Shared.Infrastructure
                     line =>
                     {
                         standardOutput.AppendLine(line);
-                        if (TryParseReadyLine(line, out int mountPort, out int nfsPort, out int nfs40Port))
+                        if (TryParseReadyLine(
+                            line,
+                            out int mountPort,
+                            out int nfsPort,
+                            out int nfs40Port,
+                            out int nfs41Port,
+                            out int nfs42Port))
                         {
-                            readyTcs.TrySetResult((mountPort, nfsPort, nfs40Port));
+                            readyTcs.TrySetResult((mountPort, nfsPort, nfs40Port, nfs41Port, nfs42Port));
                         }
                     });
 
@@ -143,7 +157,7 @@ namespace Test.Shared.Infrastructure
                     Task completedTask = await Task.WhenAny(readyTcs.Task, exitTask, delayTask).ConfigureAwait(false);
                     if (completedTask == readyTcs.Task)
                     {
-                        (int mountPort, int nfsPort, int nfs40Port) = await readyTcs.Task.ConfigureAwait(false);
+                        (int mountPort, int nfsPort, int nfs40Port, int nfs41Port, int nfs42Port) = await readyTcs.Task.ConfigureAwait(false);
                         return new PackedOpenNfsServerProcess(
                             project,
                             process,
@@ -153,7 +167,9 @@ namespace Test.Shared.Infrastructure
                             standardErrorTask,
                             mountPort,
                             nfsPort,
-                            nfs40Port);
+                            nfs40Port,
+                            nfs41Port,
+                            nfs42Port);
                     }
 
                     if (completedTask == exitTask)
@@ -276,11 +292,19 @@ namespace Test.Shared.Infrastructure
             }
         }
 
-        private static bool TryParseReadyLine(string line, out int mountPort, out int nfsPort, out int nfs40Port)
+        private static bool TryParseReadyLine(
+            string line,
+            out int mountPort,
+            out int nfsPort,
+            out int nfs40Port,
+            out int nfs41Port,
+            out int nfs42Port)
         {
             mountPort = 0;
             nfsPort = 0;
             nfs40Port = 0;
+            nfs41Port = 0;
+            nfs42Port = 0;
 
             if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("READY ", StringComparison.Ordinal))
             {
@@ -303,9 +327,13 @@ namespace Test.Shared.Infrastructure
             return values.TryGetValue("mountPort", out string? mountPortValue)
                 && values.TryGetValue("nfsPort", out string? nfsPortValue)
                 && values.TryGetValue("nfs40Port", out string? nfs40PortValue)
+                && values.TryGetValue("nfs41Port", out string? nfs41PortValue)
+                && values.TryGetValue("nfs42Port", out string? nfs42PortValue)
                 && int.TryParse(mountPortValue, out mountPort)
                 && int.TryParse(nfsPortValue, out nfsPort)
-                && int.TryParse(nfs40PortValue, out nfs40Port);
+                && int.TryParse(nfs40PortValue, out nfs40Port)
+                && int.TryParse(nfs41PortValue, out nfs41Port)
+                && int.TryParse(nfs42PortValue, out nfs42Port);
         }
     }
 }

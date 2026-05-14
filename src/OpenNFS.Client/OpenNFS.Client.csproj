@@ -16,12 +16,14 @@
   <ItemGroup>
     <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
     <ProjectReference Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
+    <ProjectReference Include="..\OpenNFS.Protocol.V42\OpenNFS.Protocol.V42.csproj" />
     <ProjectReference Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
     <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V3\OpenNFS.Protocol.V3.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
     <InternalRuntimeProject Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
+    <InternalRuntimeProject Include="..\OpenNFS.Protocol.V42\OpenNFS.Protocol.V42.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\LICENSE.md" Pack="true" PackagePath="" Link="LICENSE.md" />
@@ -42,6 +44,8 @@
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.xml" Condition="Exists('..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.xml')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.dll" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.dll')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll')" />
+      <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml')" />
     </ItemGroup>
   </Target>
 </Project>

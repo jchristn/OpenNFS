@@ -26,6 +26,7 @@ namespace OpenNFS.Client
         private readonly IOpenNfsRpcExecutor _RpcExecutor;
         private readonly object _SyncRoot = new object();
         private readonly OpenNfsTransportPipeline _TransportPipeline;
+        private readonly OpenNfsV42GroupedSessionSupport _V42GroupedSessionSupport;
         private int _NextXid = Environment.TickCount;
         private OpenNfsClientState _State = OpenNfsClientState.Created;
 
@@ -49,6 +50,7 @@ namespace OpenNFS.Client
             Settings = settings;
             _RpcExecutor = rpcExecutor;
             _TransportPipeline = transportPipeline ?? new OpenNfsTransportPipeline();
+            _V42GroupedSessionSupport = new OpenNfsV42GroupedSessionSupport(settings);
             Directories = new DirectoryApis(this);
             Files = new FileApis(this);
             Exports = new ExportApis(this);
@@ -388,7 +390,7 @@ namespace OpenNFS.Client
         /// Releases client resources asynchronously.
         /// </summary>
         /// <returns>A task that completes when disposal is finished.</returns>
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             bool shouldDisposeCancellationSource = false;
 
@@ -396,7 +398,7 @@ namespace OpenNFS.Client
             {
                 if (_State == OpenNfsClientState.Disposed)
                 {
-                    return ValueTask.CompletedTask;
+                    return;
                 }
 
                 _State = OpenNfsClientState.Disposed;
@@ -405,11 +407,10 @@ namespace OpenNFS.Client
 
             if (shouldDisposeCancellationSource)
             {
+                await _V42GroupedSessionSupport.DisposeAsync().ConfigureAwait(false);
                 _LifetimeCancellationTokenSource.Cancel();
                 _LifetimeCancellationTokenSource.Dispose();
             }
-
-            return ValueTask.CompletedTask;
         }
 
         /// <summary>
@@ -567,6 +568,34 @@ namespace OpenNFS.Client
                 idempotency,
                 cancellationToken).ConfigureAwait(false);
             return DecodeResult(encodedReply, operationName, decodeReply);
+        }
+
+        internal Task<TResult> ExecuteGroupedV42CompoundAsync<TResult>(
+            OpenNfsCompoundRequest request,
+            string operationName,
+            OpenNfsOperationIdempotency idempotency,
+            Func<ReadOnlyMemory<byte>, TResult> decodeReply,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            ArgumentNullException.ThrowIfNull(operationName);
+            ArgumentNullException.ThrowIfNull(decodeReply);
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfOperationUnavailable();
+
+            if (request.ProtocolVersion != OpenNfsProtocolVersion.Nfs42)
+            {
+                throw new ArgumentException(
+                    "The grouped v4.2 execution path requires an NFSv4.2 COMPOUND request.",
+                    nameof(request));
+            }
+
+            return _V42GroupedSessionSupport.ExecuteSequencedCompoundAsync(
+                request,
+                operationName,
+                idempotency,
+                decodeReply,
+                cancellationToken);
         }
 
         internal async Task ExecuteV3ProcedureAsync(

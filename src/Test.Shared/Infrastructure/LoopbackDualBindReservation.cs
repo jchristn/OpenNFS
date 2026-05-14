@@ -22,6 +22,29 @@ namespace Test.Shared.Infrastructure
     {
         private const int MaxAttempts = 32;
 
+        internal readonly struct Reservation
+        {
+            internal Reservation(UdpClient udpServer, TcpListener tcpListener, int port)
+            {
+                UdpServer = udpServer;
+                TcpListener = tcpListener;
+                Port = port;
+            }
+
+            internal UdpClient UdpServer { get; }
+
+            internal TcpListener TcpListener { get; }
+
+            internal int Port { get; }
+
+            internal void Deconstruct(out UdpClient udpServer, out TcpListener tcpListener, out int port)
+            {
+                udpServer = UdpServer;
+                tcpListener = TcpListener;
+                port = Port;
+            }
+        }
+
         /// <summary>
         /// Reserves a loopback port that is bindable for both UDP and TCP.
         /// </summary>
@@ -29,7 +52,7 @@ namespace Test.Shared.Infrastructure
         /// shared port number. The caller must dispose both objects.</returns>
         /// <exception cref="InvalidOperationException">Thrown when no loopback port could be reserved
         /// for both transports after <see cref="MaxAttempts"/> tries.</exception>
-        internal static (UdpClient UdpServer, TcpListener TcpListener, int Port) Reserve()
+        internal static Reservation Reserve()
         {
             for (int attempt = 0; attempt < MaxAttempts; attempt++)
             {
@@ -49,7 +72,7 @@ namespace Test.Shared.Infrastructure
                 try
                 {
                     listener.Start();
-                    return (udpClient, listener, port);
+                    return new Reservation(udpClient, listener, port);
                 }
                 catch (SocketException)
                 {

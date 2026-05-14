@@ -90,9 +90,9 @@ jobs:
         shell: pwsh
         run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot scripts/interop/pynfs/external -UseSampleServer
 
-      - name: Plan upstream pynfs v4.1 integration
+      - name: Run real pynfs v4.1 subset against the Linux NFSv4.1 peer
         shell: pwsh
-        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -UseLinuxNfs41Server
+        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -SuiteRoot scripts/interop/pynfs/external -UseLinuxNfs41Server
 
       - name: Upload hosted interop artifacts
         uses: actions/upload-artifact@v4

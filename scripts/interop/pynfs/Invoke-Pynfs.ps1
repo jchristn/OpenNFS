@@ -10,6 +10,7 @@ param(
     [string[]]$EntryPointArguments = @(),
     [int]$ServerPort = 0,
     [string]$RepositoryRoot = "",
+    [string[]]$TestCodes = @(),
     [switch]$UseSampleServer,
     [switch]$UseLinuxNfs41Server,
     [switch]$PlanOnly
@@ -37,6 +38,7 @@ function Initialize-PynfsV40SampleTree {
     $exportSourcePath = if ([string]::IsNullOrWhiteSpace($trimmedExportPath)) { $SourcePath } else { Ensure-InteropDirectory (Join-Path $SourcePath $trimmedExportPath) }
     $tmpDirectory = Ensure-InteropDirectory (Join-Path $exportSourcePath "tmp")
     $treeDirectory = Ensure-InteropDirectory (Join-Path $exportSourcePath "tree")
+    $treeSubdirectory = Ensure-InteropDirectory (Join-Path $treeDirectory "dir")
     [System.IO.File]::WriteAllBytes((Join-Path $treeDirectory "file"), [System.Text.Encoding]::ASCII.GetBytes("This is the file test data."))
 }
 
@@ -68,9 +70,30 @@ $manifestPath = Join-Path $ResultsDirectory "pynfs-manifest.json"
 $resultsJsonPath = Join-Path $ResultsDirectory "pynfs-results.json"
 $bootstrapStdoutLogPath = Join-Path $ResultsDirectory "bootstrap-stdout.log"
 $bootstrapStderrLogPath = Join-Path $ResultsDirectory "bootstrap-stderr.log"
+$effectiveTestCodes = if (($null -eq $TestCodes -or $TestCodes.Count -eq 0) -and [string]::IsNullOrWhiteSpace($EntryPoint) -and (-not $EntryPointArguments -or $EntryPointArguments.Count -eq 0)) {
+    if ($MinorVersion -eq 0) {
+        Get-DefaultPynfsV40TestCodes
+    }
+    elseif ($MinorVersion -eq 1) {
+        Get-DefaultPynfsV41TestCodes
+    }
+    else {
+        $TestCodes
+    }
+} else { $TestCodes }
 
 $resolvedSuiteRoot = if ([string]::IsNullOrWhiteSpace($SuiteRoot)) { "" } else { [System.IO.Path]::GetFullPath($SuiteRoot) }
-$effectiveEntryPoint = if ([string]::IsNullOrWhiteSpace($EntryPoint) -and $MinorVersion -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolvedSuiteRoot)) { "nfs4.0/testserver.py" } else { $EntryPoint }
+$effectiveEntryPoint = if ([string]::IsNullOrWhiteSpace($EntryPoint) -and -not [string]::IsNullOrWhiteSpace($resolvedSuiteRoot)) {
+    if ($MinorVersion -eq 0) {
+        "nfs4.0/testserver.py"
+    }
+    elseif ($MinorVersion -eq 1) {
+        "nfs4.1/testserver.py"
+    }
+    else {
+        $EntryPoint
+    }
+} else { $EntryPoint }
 $plannedServerHost = if ($UseSampleServer -and [string]::IsNullOrWhiteSpace($ServerHost)) { "host.docker.internal" } else { $ServerHost }
 $plannedServerPort = if ($ServerPort -gt 0) { [string]$ServerPort } else { "<dynamic-port>" }
 $suiteCommand = if ([string]::IsNullOrWhiteSpace($resolvedSuiteRoot)) {
@@ -83,6 +106,7 @@ else {
             -MinorVersion $MinorVersion `
             -EntryPoint $EntryPoint `
             -EntryPointArguments $EntryPointArguments `
+            -TestCodes $effectiveTestCodes `
             -ServerHost $plannedServerHost `
             -ServerPort $plannedServerPort `
             -ExportPath $ExportPath `
@@ -104,6 +128,7 @@ Write-Host "exportPath=$ExportPath"
 Write-Host "resultsDirectory=$ResultsDirectory"
 Write-Host "suiteRoot=$resolvedSuiteRoot"
 Write-Host "entryPoint=$effectiveEntryPoint"
+Write-Host "testCodes=$($effectiveTestCodes -join ',')"
 Write-Host "command=$suiteCommand"
 
 if ($PlanOnly) {
@@ -123,7 +148,12 @@ try {
         }
 
         if ([string]::IsNullOrWhiteSpace($EntryPoint) -and (-not $EntryPointArguments -or $EntryPointArguments.Count -eq 0)) {
-            Initialize-PynfsV40SampleTree -SourcePath (Join-Path $ResultsDirectory "sample\source") -ExportPath $ExportPath
+            $sampleSourcePath = Join-Path $ResultsDirectory "sample\source"
+            if (Test-Path $sampleSourcePath -PathType Container) {
+                Remove-Item -Recurse -Force -LiteralPath $sampleSourcePath
+            }
+
+            Initialize-PynfsV40SampleTree -SourcePath $sampleSourcePath -ExportPath $ExportPath
         }
 
         $sampleServer = Start-SampleInteropServer -RepositoryRoot $RepositoryRoot -ResultsDirectory $ResultsDirectory -ExportPath $ExportPath
@@ -144,6 +174,7 @@ try {
         -MinorVersion $MinorVersion `
         -EntryPoint $EntryPoint `
         -EntryPointArguments $EntryPointArguments `
+        -TestCodes $effectiveTestCodes `
         -ServerHost $ServerHost `
         -ServerPort ([string]$ServerPort) `
         -ExportPath $ExportPath `
@@ -211,6 +242,7 @@ try {
         suiteRoot = $resolvedSuiteRoot
         entryPoint = $effectiveEntryPoint
         entryPointArguments = $EntryPointArguments
+        testCodes = $effectiveTestCodes
         command = $suiteCommand
         containerExitCode = $containerResult.ExitCode
         exitCode = $effectiveExitCode

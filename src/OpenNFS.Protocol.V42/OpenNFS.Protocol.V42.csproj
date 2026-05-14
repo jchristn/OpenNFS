@@ -4,6 +4,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\OpenNFS.Server\Internal\V42\*.cs" Link="Internal\V42\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenNFS.Protocol.V41\OpenNFS.Protocol.V41.csproj" />
     <ProjectReference Include="..\OpenNFS.Rpc\OpenNFS.Rpc.csproj" />
     <ProjectReference Include="..\OpenNFS.Server\OpenNFS.Server.csproj" />
   </ItemGroup>

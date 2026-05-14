@@ -5,8 +5,13 @@ namespace OpenNFS.Server
     using System.IO;
     using System.Reflection;
     using System.Runtime.ExceptionServices;
+    using System.Security.Cryptography;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
+    using OpenNFS.Protocol.V41.Compound;
+    using OpenNFS.Protocol.V41.Sessions;
+    using OpenNFS.Protocol.V41.State;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
 
@@ -19,11 +24,17 @@ namespace OpenNFS.Server
         private const string NfsV3HostTypeName = "OpenNFS.Protocol.V3.Hosting.OpenNfsTcpServerHost";
         private const string Nfs40AssemblyName = "OpenNFS.Protocol.V40";
         private const string Nfs40HostTypeName = "OpenNFS.Protocol.V40.Hosting.OpenNfsTcpNfs40ServerHost";
+        private const string Nfs41AssemblyName = "OpenNFS.Server";
+        private const string Nfs41HostTypeName = "OpenNFS.Server.Internal.V41.OpenNfsTcpNfs41ServerHost";
+        private const string Nfs42AssemblyName = "OpenNFS.Protocol.V42";
+        private const string Nfs42HostTypeName = "OpenNFS.Server.Internal.V42.OpenNfsTcpNfs42ServerHost";
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
         private readonly OpenNfsServerApplicationOptions _options;
         private readonly OpenNfsServer _server;
         private bool _disposed;
         private IAsyncDisposable? _nfs40Host;
+        private IAsyncDisposable? _nfs41Host;
+        private IAsyncDisposable? _nfs42Host;
         private IAsyncDisposable? _nfsV3Host;
 
         internal OpenNfsServerApplication(OpenNfsServer server, OpenNfsServerApplicationOptions options)
@@ -83,6 +94,18 @@ namespace OpenNFS.Server
         public int Nfs40Port { get; private set; }
 
         /// <summary>
+        /// Gets the bound NFSv4.1 TCP port.
+        /// Returns <c>0</c> when the NFSv4.1 surface is disabled or the application has not been started.
+        /// </summary>
+        public int Nfs41Port { get; private set; }
+
+        /// <summary>
+        /// Gets the bound NFSv4.2 TCP port.
+        /// Returns <c>0</c> when the NFSv4.2 surface is disabled or the application has not been started.
+        /// </summary>
+        public int Nfs42Port { get; private set; }
+
+        /// <summary>
         /// Resolves and validates the exports exposed by the configured host surface.
         /// This mirrors the immutable server wrapper on the primary managed application path.
         /// </summary>
@@ -135,9 +158,17 @@ namespace OpenNFS.Server
 
                 IAsyncDisposable? startedNfsV3Host = null;
                 IAsyncDisposable? startedNfs40Host = null;
+                IAsyncDisposable? startedNfs41Host = null;
+                IAsyncDisposable? startedNfs42Host = null;
 
                 try
                 {
+                    Nfs41SessionOperationProcessor? sessionProcessor = null;
+                    if (_options.EnableNfs41 || _options.EnableNfs42)
+                    {
+                        sessionProcessor = CreateSessionProcessor();
+                    }
+
                     if (_options.EnableNfsV3)
                     {
                         object nfsV3Host = StartHost(
@@ -168,12 +199,50 @@ namespace OpenNFS.Server
                         Nfs40Port = ReadRequiredIntProperty(nfs40Host, nameof(NfsPort));
                     }
 
+                    if (_options.EnableNfs41)
+                    {
+                        object nfs41Host = StartHost(
+                            Nfs41AssemblyName,
+                            Nfs41HostTypeName,
+                            _server,
+                            sessionProcessor!,
+                            ListenerAddress,
+                            _options.Nfs41Port);
+                        startedNfs41Host = RequireAsyncDisposable(nfs41Host, Nfs41HostTypeName);
+                        Nfs41Port = ReadRequiredIntProperty(nfs41Host, nameof(NfsPort));
+                    }
+
+                    if (_options.EnableNfs42)
+                    {
+                        object nfs42Host = StartHost(
+                            Nfs42AssemblyName,
+                            Nfs42HostTypeName,
+                            _server,
+                            sessionProcessor!,
+                            ListenerAddress,
+                            _options.Nfs42Port);
+                        startedNfs42Host = RequireAsyncDisposable(nfs42Host, Nfs42HostTypeName);
+                        Nfs42Port = ReadRequiredIntProperty(nfs42Host, nameof(NfsPort));
+                    }
+
                     _nfsV3Host = startedNfsV3Host;
                     _nfs40Host = startedNfs40Host;
+                    _nfs41Host = startedNfs41Host;
+                    _nfs42Host = startedNfs42Host;
                     IsRunning = true;
                 }
                 catch (OperationCanceledException)
                 {
+                    if (startedNfs42Host is not null)
+                    {
+                        await startedNfs42Host.DisposeAsync().ConfigureAwait(false);
+                    }
+
+                    if (startedNfs41Host is not null)
+                    {
+                        await startedNfs41Host.DisposeAsync().ConfigureAwait(false);
+                    }
+
                     if (startedNfs40Host is not null)
                     {
                         await startedNfs40Host.DisposeAsync().ConfigureAwait(false);
@@ -189,6 +258,16 @@ namespace OpenNFS.Server
                 }
                 catch (Exception exception)
                 {
+                    if (startedNfs42Host is not null)
+                    {
+                        await startedNfs42Host.DisposeAsync().ConfigureAwait(false);
+                    }
+
+                    if (startedNfs41Host is not null)
+                    {
+                        await startedNfs41Host.DisposeAsync().ConfigureAwait(false);
+                    }
+
                     if (startedNfs40Host is not null)
                     {
                         await startedNfs40Host.DisposeAsync().ConfigureAwait(false);
@@ -233,6 +312,8 @@ namespace OpenNFS.Server
         {
             IAsyncDisposable? nfsV3Host = null;
             IAsyncDisposable? nfs40Host = null;
+            IAsyncDisposable? nfs41Host = null;
+            IAsyncDisposable? nfs42Host = null;
 
             ThrowIfDisposed();
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -247,14 +328,28 @@ namespace OpenNFS.Server
 
                 nfsV3Host = _nfsV3Host;
                 nfs40Host = _nfs40Host;
+                nfs41Host = _nfs41Host;
+                nfs42Host = _nfs42Host;
                 _nfsV3Host = null;
                 _nfs40Host = null;
+                _nfs41Host = null;
+                _nfs42Host = null;
                 IsRunning = false;
                 ResetBoundPorts();
             }
             finally
             {
                 _lifecycleGate.Release();
+            }
+
+            if (nfs42Host is not null)
+            {
+                await nfs42Host.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (nfs41Host is not null)
+            {
+                await nfs41Host.DisposeAsync().ConfigureAwait(false);
             }
 
             if (nfs40Host is not null)
@@ -308,6 +403,8 @@ namespace OpenNFS.Server
         {
             IAsyncDisposable? nfsV3Host = null;
             IAsyncDisposable? nfs40Host = null;
+            IAsyncDisposable? nfs41Host = null;
+            IAsyncDisposable? nfs42Host = null;
 
             await _lifecycleGate.WaitAsync().ConfigureAwait(false);
             try
@@ -320,14 +417,28 @@ namespace OpenNFS.Server
                 _disposed = true;
                 nfsV3Host = _nfsV3Host;
                 nfs40Host = _nfs40Host;
+                nfs41Host = _nfs41Host;
+                nfs42Host = _nfs42Host;
                 _nfsV3Host = null;
                 _nfs40Host = null;
+                _nfs41Host = null;
+                _nfs42Host = null;
                 IsRunning = false;
                 ResetBoundPorts();
             }
             finally
             {
                 _lifecycleGate.Release();
+            }
+
+            if (nfs42Host is not null)
+            {
+                await nfs42Host.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (nfs41Host is not null)
+            {
+                await nfs41Host.DisposeAsync().ConfigureAwait(false);
             }
 
             if (nfs40Host is not null)
@@ -417,6 +528,45 @@ namespace OpenNFS.Server
             NlmPort = 0;
             NsmPort = 0;
             Nfs40Port = 0;
+            Nfs41Port = 0;
+            Nfs42Port = 0;
+        }
+
+        private Nfs41SessionOperationProcessor CreateSessionProcessor()
+        {
+            byte[] serverIdentityBytes = Encoding.UTF8.GetBytes(_server.Settings.ServerName);
+            if (serverIdentityBytes.Length == 0)
+            {
+                serverIdentityBytes = Encoding.UTF8.GetBytes("OpenNFS");
+            }
+
+            Nfs41ChannelAttributes channelMaximums = new Nfs41ChannelAttributes(
+                headerPadSize: 0,
+                maximumRequestSize: 1024 * 1024,
+                maximumResponseSize: 1024 * 1024,
+                maximumCachedResponseSize: 64 * 1024,
+                maximumOperations: 64,
+                maximumRequests: 64);
+            Nfs41ServerConfiguration configuration = new Nfs41ServerConfiguration(
+                new Nfs41ServerOwner(
+                    minorId: 1,
+                    majorId: serverIdentityBytes),
+                serverScope: serverIdentityBytes,
+                foreChannelMaximums: channelMaximums,
+                backChannelMaximums: channelMaximums);
+            Nfs41ClientRegistry clientRegistry = new Nfs41ClientRegistry();
+            Nfs41SessionRegistry sessionRegistry = new Nfs41SessionRegistry();
+
+            return new Nfs41SessionOperationProcessor(
+                configuration,
+                clientRegistry,
+                sessionRegistry,
+                static () =>
+                {
+                    byte[] sessionId = new byte[Nfs41SessionId.Length];
+                    RandomNumberGenerator.Fill(sessionId);
+                    return sessionId;
+                });
         }
     }
 }

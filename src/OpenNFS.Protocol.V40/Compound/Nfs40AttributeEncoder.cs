@@ -104,7 +104,7 @@ namespace OpenNFS.Protocol.V40.Compound
             };
         }
 
-        internal static async Task<(fattr4? Attributes, nfsstat4 ErrorStatus)> TryCreateAttributesAsync(
+        internal static async Task<TryCreateAttributesResult> TryCreateAttributesAsync(
             OpenNfsServer server,
             Nfs40CompoundResolvedHandle resolvedHandle,
             bitmap4? requestedAttributes,
@@ -121,7 +121,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 if (!IsSupportedAttribute(requestedAttributeIds[index], supportedAttributeIds))
                 {
-                    return (null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
+                    return new TryCreateAttributesResult(null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
                 }
             }
 
@@ -130,7 +130,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 if (server.Capabilities.IdMapper is null)
                 {
-                    return (null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
+                    return new TryCreateAttributesResult(null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
                 }
 
                 identityResponse =
@@ -146,7 +146,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 if (server.Capabilities.Acls is null)
                 {
-                    return (null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
+                    return new TryCreateAttributesResult(null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
                 }
 
                 aclResponse =
@@ -169,7 +169,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     aclResponse);
             }
 
-            return (
+            return new TryCreateAttributesResult(
                 new fattr4
                 {
                     attrmask = CreateBitmap(requestedAttributeIds.ToArray()),
