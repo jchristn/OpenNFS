@@ -34,7 +34,13 @@ $requiredArtifacts = @(
     },
     @{
         Suite = "pynfs"
-        ManifestPath = Join-Path $resolvedResultsDirectory "pynfs\pynfs-manifest.json"
+        MinorVersion = 0
+        ManifestPath = Join-Path $resolvedResultsDirectory "pynfs-v40\pynfs-manifest.json"
+    },
+    @{
+        Suite = "pynfs"
+        MinorVersion = 1
+        ManifestPath = Join-Path $resolvedResultsDirectory "pynfs-v41\pynfs-manifest.json"
     }
 )
 
@@ -49,6 +55,10 @@ foreach ($artifact in $requiredArtifacts) {
     $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
     if ($manifest.suite -ne $suite) {
         throw "Conformance artifact '$manifestPath' has suite '$($manifest.suite)' instead of '$suite'."
+    }
+
+    if ($artifact.ContainsKey("MinorVersion") -and $manifest.minorVersion -ne $artifact.MinorVersion) {
+        throw "Conformance artifact '$manifestPath' has minorVersion '$($manifest.minorVersion)' instead of '$($artifact.MinorVersion)'."
     }
 
     if ($manifest.exitCode -ne 0) {

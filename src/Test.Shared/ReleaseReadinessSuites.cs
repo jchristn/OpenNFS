@@ -270,7 +270,20 @@ namespace Test.Shared
                                     "-MinorVersion", "0",
                                     "-ServerHost", "sample-host",
                                     "-ExportPath", "/export",
-                                    "-ResultsDirectory", "artifacts/pynfs",
+                                    "-ResultsDirectory", "artifacts/pynfs-v40",
+                                },
+                                "pynfs",
+                                cancellationToken).ConfigureAwait(false);
+
+                            await AssertPlanModeAsync(
+                                @"scripts\interop\pynfs\Invoke-Pynfs.ps1",
+                                new[]
+                                {
+                                    "-PlanOnly",
+                                    "-MinorVersion", "1",
+                                    "-ExportPath", "/export",
+                                    "-ResultsDirectory", "artifacts/pynfs-v41",
+                                    "-UseLinuxNfs41Server",
                                 },
                                 "pynfs",
                                 cancellationToken).ConfigureAwait(false);
@@ -294,7 +307,18 @@ namespace Test.Shared
                                     "-MinorVersion", "0",
                                     "-ServerHost", "sample-host",
                                     "-ExportPath", "/export",
-                                    "-ResultsDirectory", "artifacts/pynfs",
+                                    "-ResultsDirectory", "artifacts/pynfs-v40",
+                                },
+                                cancellationToken).ConfigureAwait(false);
+
+                            PowerShellCommandResult pynfs41Negative = await RunScriptAsync(
+                                @"scripts\interop\pynfs\Invoke-Pynfs.ps1",
+                                new[]
+                                {
+                                    "-MinorVersion", "1",
+                                    "-ExportPath", "/export",
+                                    "-ResultsDirectory", "artifacts/pynfs-v41",
+                                    "-UseLinuxNfs41Server",
                                 },
                                 cancellationToken).ConfigureAwait(false);
 
@@ -313,11 +337,22 @@ namespace Test.Shared
                                 || !ContainsEither(pynfsNegative, "PYNFS_ROOT", "SuiteRoot"))
                             {
                                 throw new InvalidOperationException(
-                                    "Expected pynfs execution without a suite root to fail clearly."
+                                    "Expected pynfs NFSv4.0 execution without a suite root to fail clearly."
                                     + Environment.NewLine
                                     + pynfsNegative.StandardOutput
                                     + Environment.NewLine
                                     + pynfsNegative.StandardError);
+                            }
+
+                            if (pynfs41Negative.ExitCode == 0
+                                || !ContainsEither(pynfs41Negative, "PYNFS_ROOT", "SuiteRoot"))
+                            {
+                                throw new InvalidOperationException(
+                                    "Expected pynfs NFSv4.1 execution without a suite root to fail clearly."
+                                    + Environment.NewLine
+                                    + pynfs41Negative.StandardOutput
+                                    + Environment.NewLine
+                                    + pynfs41Negative.StandardError);
                             }
                         }),
 
@@ -364,12 +399,17 @@ namespace Test.Shared
                                 || !hostedWorkflow.Contains("Invoke-Pjdfstest.ps1 -ProtocolVersion NfsV3", StringComparison.Ordinal)
                                 || !hostedWorkflow.Contains("Invoke-Connectathon.ps1 -ProtocolVersion NfsV3", StringComparison.Ordinal)
                                 || !hostedWorkflow.Contains("Invoke-Pynfs.ps1 -MinorVersion 0", StringComparison.Ordinal)
+                                || !hostedWorkflow.Contains("Invoke-Pynfs.ps1 -MinorVersion 1", StringComparison.Ordinal)
                                 || !hostedWorkflow.Contains("-UseSampleServer", StringComparison.Ordinal)
+                                || !hostedWorkflow.Contains("-UseLinuxNfs41Server", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("Invoke-PrivilegedInterop.ps1", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:PJDFSTEST_ROOT", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:CONNECTATHON_ROOT", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:PYNFS_ROOT", StringComparison.Ordinal)
-                                || !pynfsWorkflow.Contains("$env:PYNFS_ENTRYPOINT", StringComparison.Ordinal))
+                                || !selfHostedWorkflow.Contains("$env:PYNFS41_ENTRYPOINT", StringComparison.Ordinal)
+                                || !pynfsWorkflow.Contains("$env:PYNFS_ENTRYPOINT", StringComparison.Ordinal)
+                                || !pynfsWorkflow.Contains("$env:PYNFS41_ENTRYPOINT", StringComparison.Ordinal)
+                                || !pynfsWorkflow.Contains("-UseLinuxNfs41Server", StringComparison.Ordinal))
                             {
                                 throw new InvalidOperationException("Expected the workflow files to reference the new release-validation and conformance harness scripts.");
                             }
@@ -430,14 +470,22 @@ namespace Test.Shared
                 await WriteConformanceManifestAsync(
                     Path.Combine(artifactsRoot, "pjdfstest", "pjdfstest-manifest.json"),
                     "pjdfstest",
+                    minorVersion: null,
                     cancellationToken).ConfigureAwait(false);
                 await WriteConformanceManifestAsync(
                     Path.Combine(artifactsRoot, "connectathon", "connectathon-manifest.json"),
                     "connectathon",
+                    minorVersion: null,
                     cancellationToken).ConfigureAwait(false);
                 await WriteConformanceManifestAsync(
-                    Path.Combine(artifactsRoot, "pynfs", "pynfs-manifest.json"),
+                    Path.Combine(artifactsRoot, "pynfs-v40", "pynfs-manifest.json"),
                     "pynfs",
+                    minorVersion: 0,
+                    cancellationToken).ConfigureAwait(false);
+                await WriteConformanceManifestAsync(
+                    Path.Combine(artifactsRoot, "pynfs-v41", "pynfs-manifest.json"),
+                    "pynfs",
+                    minorVersion: 1,
                     cancellationToken).ConfigureAwait(false);
 
                 PowerShellCommandResult positiveResult = await RunScriptAsync(
@@ -455,16 +503,16 @@ namespace Test.Shared
                         + positiveResult.StandardError);
                 }
 
-                File.Delete(Path.Combine(artifactsRoot, "pynfs", "pynfs-manifest.json"));
+                File.Delete(Path.Combine(artifactsRoot, "pynfs-v41", "pynfs-manifest.json"));
                 PowerShellCommandResult negativeResult = await RunScriptAsync(
                     @"scripts\release\Assert-ConformanceArtifacts.ps1",
                     new[] { "-RepositoryRoot", tempRoot, "-ResultsDirectory", artifactsRoot },
                     cancellationToken).ConfigureAwait(false);
                 if (negativeResult.ExitCode == 0
-                    || !ContainsEither(negativeResult, "Required conformance artifact", "pynfs"))
+                    || !ContainsEither(negativeResult, "Required conformance artifact", "pynfs-v41"))
                 {
                     throw new InvalidOperationException(
-                        "Expected conformance artifact validation to reject a missing pynfs manifest."
+                        "Expected conformance artifact validation to reject a missing pynfs v4.1 manifest."
                         + Environment.NewLine
                         + negativeResult.StandardOutput
                         + Environment.NewLine
@@ -480,12 +528,14 @@ namespace Test.Shared
         private static async Task WriteConformanceManifestAsync(
             string manifestPath,
             string suite,
+            int? minorVersion,
             CancellationToken cancellationToken)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
             var manifest = new
             {
                 suite,
+                minorVersion,
                 suiteRoot = Path.Combine(Path.GetTempPath(), "real-" + suite),
                 exitCode = 0,
                 validatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
@@ -771,14 +821,14 @@ namespace Test.Shared
                         + connectathonResult.StandardError);
                 }
 
-                string pynfsResults = Path.Combine(resultsRoot, "pynfs");
-                PowerShellCommandResult pynfsResult = await RunScriptAsync(
+                string pynfsV40Results = Path.Combine(resultsRoot, "pynfs-v40");
+                PowerShellCommandResult pynfsV40Result = await RunScriptAsync(
                     @"scripts\interop\pynfs\Invoke-Pynfs.ps1",
                     new[]
                     {
                         "-MinorVersion", "0",
                         "-ExportPath", "/exports/sample",
-                        "-ResultsDirectory", pynfsResults,
+                        "-ResultsDirectory", pynfsV40Results,
                         "-SuiteRoot", pynfsRoot,
                         "-EntryPoint", "entry.py",
                         "-UseSampleServer",
@@ -786,16 +836,43 @@ namespace Test.Shared
                     cancellationToken,
                     timeout: TimeSpan.FromMinutes(10)).ConfigureAwait(false);
 
-                if (pynfsResult.ExitCode != 0
-                    || !File.Exists(Path.Combine(pynfsResults, "pynfs-manifest.json"))
-                    || !File.ReadAllText(Path.Combine(pynfsResults, "stdout.log")).Contains("PYNFS SYNTHETIC OK", StringComparison.Ordinal))
+                if (pynfsV40Result.ExitCode != 0
+                    || !File.Exists(Path.Combine(pynfsV40Results, "pynfs-manifest.json"))
+                    || !File.ReadAllText(Path.Combine(pynfsV40Results, "stdout.log")).Contains("PYNFS SYNTHETIC OK", StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException(
-                        "Expected the pynfs harness to execute a synthetic direct-peer suite successfully."
+                        "Expected the pynfs v4.0 harness to execute a synthetic direct-peer suite successfully."
                         + Environment.NewLine
-                        + pynfsResult.StandardOutput
+                        + pynfsV40Result.StandardOutput
                         + Environment.NewLine
-                        + pynfsResult.StandardError);
+                        + pynfsV40Result.StandardError);
+                }
+
+                string pynfsV41Results = Path.Combine(resultsRoot, "pynfs-v41");
+                PowerShellCommandResult pynfsV41Result = await RunScriptAsync(
+                    @"scripts\interop\pynfs\Invoke-Pynfs.ps1",
+                    new[]
+                    {
+                        "-MinorVersion", "1",
+                        "-ExportPath", "/export",
+                        "-ResultsDirectory", pynfsV41Results,
+                        "-SuiteRoot", pynfsRoot,
+                        "-EntryPoint", "entry.py",
+                        "-UseLinuxNfs41Server",
+                    },
+                    cancellationToken,
+                    timeout: TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+
+                if (pynfsV41Result.ExitCode != 0
+                    || !File.Exists(Path.Combine(pynfsV41Results, "pynfs-manifest.json"))
+                    || !File.ReadAllText(Path.Combine(pynfsV41Results, "stdout.log")).Contains("PYNFS SYNTHETIC OK", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Expected the pynfs v4.1 harness to execute a synthetic direct-peer suite successfully."
+                        + Environment.NewLine
+                        + pynfsV41Result.StandardOutput
+                        + Environment.NewLine
+                        + pynfsV41Result.StandardError);
                 }
             }
             finally

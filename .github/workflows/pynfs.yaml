@@ -30,14 +30,24 @@ jobs:
         shell: pwsh
         run: ./scripts/release/Assert-NoSkippedTests.ps1
 
-      - name: Execute or plan pynfs integration
+      - name: Execute or plan pynfs NFSv4.0 integration
         shell: pwsh
         run: |
           if ($env:PYNFS_ROOT -and $env:PYNFS_ENTRYPOINT) {
-            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
           }
           else {
-            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40
+          }
+
+      - name: Execute or plan pynfs NFSv4.1 integration
+        shell: pwsh
+        run: |
+          if ($env:PYNFS_ROOT -and $env:PYNFS41_ENTRYPOINT) {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS41_ENTRYPOINT -UseLinuxNfs41Server
+          }
+          else {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -UseLinuxNfs41Server
           }
 
       - name: Upload pynfs planning artifacts
@@ -45,5 +55,7 @@ jobs:
         if: always()
         with:
           name: pynfs-results
-          path: artifacts/pynfs
+          path: |
+            artifacts/pynfs-v40
+            artifacts/pynfs-v41
           if-no-files-found: ignore

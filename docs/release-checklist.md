@@ -38,6 +38,11 @@ Use this checklist before any branch claims that a protocol version or security 
 - The direct-peer `OpenNFS.Client -> knfsd` matrix passes for the claimed NFSv4.0 surface.
 - Required `pynfs` suites for the claimed NFSv4.0 surface pass, including negative-path coverage.
 
+## NFSv4.1 support gates
+
+- The direct-peer NFSv4.1 session matrix passes for the claimed `OpenNFS.Client` surface.
+- Required `pynfs` suites for the claimed NFSv4.1 surface pass, including session-management and negative-path coverage.
+
 ## Security-mode gates
 
 - No security mode is described as supported until its peer matrix and conformance suites pass.

@@ -131,6 +131,203 @@ function Ensure-LinuxClientInteropImage {
     return $image
 }
 
+function Ensure-LinuxNfs41InteropImage {
+    param([string]$RepositoryRoot)
+
+    $image = "opennfs-test/linux-nfs-server-ganesha-v4:local"
+    $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    if ($inspect.ExitCode -eq 0) {
+        return $image
+    }
+
+    $contextDirectory = Join-Path $RepositoryRoot "scripts/interop/linux/nfs-server-ganesha-v4"
+    $build = Invoke-InteropProcess -FilePath "docker" -Arguments @("build", "--no-cache", "--tag", $image, $contextDirectory) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 600
+    $verify = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    if ($verify.ExitCode -ne 0) {
+        throw "Failed to build the Linux NFSv4.1 server image.$([Environment]::NewLine)stdout:$([Environment]::NewLine)$($build.StandardOutput)$([Environment]::NewLine)stderr:$([Environment]::NewLine)$($build.StandardError)"
+    }
+
+    return $image
+}
+
+function Start-LinuxNfs41InteropServer {
+    param([string]$RepositoryRoot)
+
+    $image = Ensure-LinuxNfs41InteropImage -RepositoryRoot $RepositoryRoot
+    $containerName = "opennfs-interop-linux-nfs41-" + [Guid]::NewGuid().ToString("N")
+
+    try {
+        $run = Invoke-InteropProcess -FilePath "docker" -Arguments @(
+            "run",
+            "--detach",
+            "--name",
+            $containerName,
+            "--publish",
+            "127.0.0.1::2049",
+            "--cap-add",
+            "DAC_READ_SEARCH",
+            "--tmpfs",
+            "/export-real:rw,mode=0777,size=16m",
+            $image
+        ) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 120
+
+        if ($run.ExitCode -ne 0) {
+            throw "Failed to start the Linux NFSv4.1 server container.$([Environment]::NewLine)stdout:$([Environment]::NewLine)$($run.StandardOutput)$([Environment]::NewLine)stderr:$([Environment]::NewLine)$($run.StandardError)"
+        }
+
+        $serverPort = Wait-InteropContainerPublishedPort -RepositoryRoot $RepositoryRoot -ContainerName $containerName -ContainerPort "2049/tcp"
+        Wait-TcpEndpointReady -HostName "127.0.0.1" -Port $serverPort
+
+        return [pscustomobject]@{
+            ContainerName = $containerName
+            ServerHost = "host.docker.internal"
+            ServerPort = $serverPort
+            Image = $image
+        }
+    }
+    catch {
+        $logs = ""
+        try {
+            $logs = Get-InteropContainerLogs -RepositoryRoot $RepositoryRoot -ContainerName $containerName
+        }
+        catch {
+        }
+
+        Remove-InteropContainer -RepositoryRoot $RepositoryRoot -ContainerName $containerName
+
+        if ([string]::IsNullOrWhiteSpace($logs)) {
+            throw
+        }
+
+        throw "$($_.Exception.Message)$([Environment]::NewLine)logs:$([Environment]::NewLine)$logs"
+    }
+}
+
+function Get-InteropContainerInspectValue {
+    param(
+        [string]$RepositoryRoot,
+        [string]$ContainerName,
+        [string]$Template
+    )
+
+    $result = Invoke-InteropProcess -FilePath "docker" -Arguments @(
+        "inspect",
+        "--format",
+        $Template,
+        $ContainerName
+    ) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+
+    if ($result.ExitCode -ne 0) {
+        throw "docker inspect failed for '$ContainerName'.$([Environment]::NewLine)stdout:$([Environment]::NewLine)$($result.StandardOutput)$([Environment]::NewLine)stderr:$([Environment]::NewLine)$($result.StandardError)"
+    }
+
+    return $result.StandardOutput.Trim()
+}
+
+function Wait-InteropContainerPublishedPort {
+    param(
+        [string]$RepositoryRoot,
+        [string]$ContainerName,
+        [string]$ContainerPort
+    )
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
+    $parsedPort = 0
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $portResult = Invoke-InteropProcess -FilePath "docker" -Arguments @("port", $ContainerName, $ContainerPort) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+        if ($portResult.ExitCode -eq 0) {
+            $hostPortLine = $portResult.StandardOutput.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($hostPortLine)) {
+                $hostPort = ($hostPortLine -split ":")[-1].Trim()
+                if ([int]::TryParse($hostPort, [ref]$parsedPort)) {
+                    return $parsedPort
+                }
+            }
+        }
+
+        $status = Get-InteropContainerInspectValue `
+            -RepositoryRoot $RepositoryRoot `
+            -ContainerName $ContainerName `
+            -Template "{{ .State.Status }}"
+        if ([string]::Equals($status, "exited", [System.StringComparison]::OrdinalIgnoreCase) -or [string]::Equals($status, "dead", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $exitCode = Get-InteropContainerInspectValue `
+                -RepositoryRoot $RepositoryRoot `
+                -ContainerName $ContainerName `
+                -Template "{{ .State.ExitCode }}"
+            $logs = Get-InteropContainerLogs -RepositoryRoot $RepositoryRoot -ContainerName $ContainerName
+
+            throw "The Linux NFSv4.1 server container '$ContainerName' exited before Docker published $ContainerPort.$([Environment]::NewLine)status: $status$([Environment]::NewLine)exit code: $exitCode$([Environment]::NewLine)logs:$([Environment]::NewLine)$logs"
+        }
+
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Timed out waiting for Docker to publish $ContainerPort for Linux NFSv4.1 server container '$ContainerName'."
+}
+
+function Get-InteropContainerLogs {
+    param(
+        [string]$RepositoryRoot,
+        [string]$ContainerName
+    )
+
+    $result = Invoke-InteropProcess -FilePath "docker" -Arguments @("logs", $ContainerName) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+    return $result.StandardOutput + $([Environment]::NewLine) + $result.StandardError
+}
+
+function Remove-InteropContainer {
+    param(
+        [string]$RepositoryRoot,
+        [string]$ContainerName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ContainerName)) {
+        return
+    }
+
+    try {
+        $null = Invoke-InteropProcess -FilePath "docker" -Arguments @("rm", "--force", $ContainerName) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+    }
+    catch {
+    }
+}
+
+function Wait-TcpEndpointReady {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastException = $null
+
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $connectTask = $client.ConnectAsync($HostName, $Port)
+            if (-not $connectTask.Wait([TimeSpan]::FromSeconds(2))) {
+                throw [System.TimeoutException]::new("Timed out connecting to ${HostName}:$Port.")
+            }
+
+            return
+        }
+        catch {
+            $lastException = $_.Exception
+            Start-Sleep -Milliseconds 250
+        }
+        finally {
+            $client.Dispose()
+        }
+    }
+
+    if ($null -ne $lastException) {
+        throw "Timed out waiting for TCP endpoint ${HostName}:$Port to accept connections. Last error: $($lastException.Message)"
+    }
+
+    throw "Timed out waiting for TCP endpoint ${HostName}:$Port to accept connections."
+}
+
 function Start-SampleInteropServer {
     param(
         [string]$RepositoryRoot,

@@ -70,9 +70,13 @@ jobs:
         shell: pwsh
         run: ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon-smoke -SuiteRoot artifacts/conformance-smoke/connectathon -Subset general -UseSampleServer
 
-      - name: Run synthetic pynfs wrapper smoke
+      - name: Run synthetic pynfs v4.0 wrapper smoke
         shell: pwsh
-        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-smoke -SuiteRoot artifacts/conformance-smoke/pynfs -EntryPoint entry.py -UseSampleServer
+        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40-smoke -SuiteRoot artifacts/conformance-smoke/pynfs -EntryPoint entry.py -UseSampleServer
+
+      - name: Run synthetic pynfs v4.1 wrapper smoke
+        shell: pwsh
+        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41-smoke -SuiteRoot artifacts/conformance-smoke/pynfs -EntryPoint entry.py -UseLinuxNfs41Server
 
       - name: Plan upstream pjdfstest integration
         shell: pwsh
@@ -82,9 +86,13 @@ jobs:
         shell: pwsh
         run: ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon
 
-      - name: Plan upstream pynfs integration
+      - name: Plan upstream pynfs v4.0 integration
         shell: pwsh
-        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs
+        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40
+
+      - name: Plan upstream pynfs v4.1 integration
+        shell: pwsh
+        run: ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 1 -ExportPath /export -ResultsDirectory artifacts/pynfs-v41 -UseLinuxNfs41Server
 
       - name: Upload hosted interop artifacts
         uses: actions/upload-artifact@v4
