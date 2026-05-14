@@ -85,14 +85,37 @@ function Invoke-InteropProcess {
     $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) "opennfs-interop-stderr-$([Guid]::NewGuid().ToString('N')).log"
 
     try {
-        Push-Location $WorkingDirectory
-        try {
-            & $FilePath @Arguments 1> $stdoutPath 2> $stderrPath
-            $exitCode = $LASTEXITCODE
+        $argumentString = ($Arguments | ForEach-Object { ConvertTo-InteropWindowsProcessArgument -Value $_ }) -join " "
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $FilePath
+        $startInfo.Arguments = $argumentString
+        $startInfo.WorkingDirectory = $WorkingDirectory
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+
+        $process = [System.Diagnostics.Process]::new()
+        $process.StartInfo = $startInfo
+        $process.Start() | Out-Null
+
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try {
+                $process.Kill()
+            }
+            catch {
+            }
+
+            throw "Process '$FilePath' timed out after $TimeoutSeconds seconds."
         }
-        finally {
-            Pop-Location
-        }
+
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        [System.IO.File]::WriteAllText($stdoutPath, $stdoutTask.GetAwaiter().GetResult())
+        [System.IO.File]::WriteAllText($stderrPath, $stderrTask.GetAwaiter().GetResult())
 
         return [pscustomobject]@{
             ExitCode       = $exitCode
@@ -112,11 +135,75 @@ function Invoke-InteropProcess {
     }
 }
 
+function ConvertTo-InteropWindowsProcessArgument {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    if ($Value.Length -eq 0) {
+        return '""'
+    }
+
+    if ($Value -notmatch '[\s"]') {
+        return $Value
+    }
+
+    $builder = [System.Text.StringBuilder]::new()
+    $null = $builder.Append('"')
+    $backslashCount = 0
+
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashCount += 1
+            continue
+        }
+
+        if ($character -eq '"') {
+            if ($backslashCount -gt 0) {
+                $null = $builder.Append('\', ($backslashCount * 2) + 1)
+            }
+            else {
+                $null = $builder.Append('\')
+            }
+
+            $null = $builder.Append('"')
+            $backslashCount = 0
+            continue
+        }
+
+        if ($backslashCount -gt 0) {
+            $null = $builder.Append('\', $backslashCount)
+            $backslashCount = 0
+        }
+
+        $null = $builder.Append($character)
+    }
+
+    if ($backslashCount -gt 0) {
+        $null = $builder.Append('\', $backslashCount * 2)
+    }
+
+    $null = $builder.Append('"')
+    return $builder.ToString()
+}
+
 function Ensure-LinuxClientInteropImage {
     param([string]$RepositoryRoot)
 
-    $image = "opennfs-test/linux-nfs-client:local"
-    $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    $image = "opennfs-test/linux-nfs-client:local-v2"
+    try {
+        $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    }
+    catch {
+        $inspect = [pscustomobject]@{
+            ExitCode = 1
+            StandardOutput = ""
+            StandardError = $_.Exception.Message
+            CommandLine = "docker image inspect $image"
+        }
+    }
     if ($inspect.ExitCode -eq 0) {
         return $image
     }
@@ -135,7 +222,17 @@ function Ensure-LinuxNfs41InteropImage {
     param([string]$RepositoryRoot)
 
     $image = "opennfs-test/linux-nfs-server-ganesha-v4:local"
-    $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    try {
+        $inspect = Invoke-InteropProcess -FilePath "docker" -Arguments @("image", "inspect", $image) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 60
+    }
+    catch {
+        $inspect = [pscustomobject]@{
+            ExitCode = 1
+            StandardOutput = ""
+            StandardError = $_.Exception.Message
+            CommandLine = "docker image inspect $image"
+        }
+    }
     if ($inspect.ExitCode -eq 0) {
         return $image
     }
@@ -234,7 +331,17 @@ function Wait-InteropContainerPublishedPort {
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
     $parsedPort = 0
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
-        $portResult = Invoke-InteropProcess -FilePath "docker" -Arguments @("port", $ContainerName, $ContainerPort) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+        try {
+            $portResult = Invoke-InteropProcess -FilePath "docker" -Arguments @("port", $ContainerName, $ContainerPort) -WorkingDirectory $RepositoryRoot -TimeoutSeconds 30
+        }
+        catch {
+            $portResult = [pscustomobject]@{
+                ExitCode = 1
+                StandardOutput = ""
+                StandardError = $_.Exception.Message
+                CommandLine = "docker port $ContainerName $ContainerPort"
+            }
+        }
         if ($portResult.ExitCode -eq 0) {
             $hostPortLine = $portResult.StandardOutput.Trim()
             if (-not [string]::IsNullOrWhiteSpace($hostPortLine)) {
@@ -544,12 +651,22 @@ function Resolve-CthonSuiteCommand {
 function Resolve-PynfsCommand {
     param(
         [string]$SuiteRoot,
+        [int]$MinorVersion,
         [string]$EntryPoint,
-        [string[]]$EntryPointArguments
+        [string[]]$EntryPointArguments,
+        [string]$ServerHost,
+        [string]$ServerPort,
+        [string]$ExportPath,
+        [string]$ResultsJsonPath
     )
 
     if ([string]::IsNullOrWhiteSpace($EntryPoint)) {
-        throw "An explicit -EntryPoint must be supplied for pynfs execution."
+        if ($MinorVersion -eq 0) {
+            $EntryPoint = "nfs4.0/testserver.py"
+        }
+        else {
+            throw "An explicit -EntryPoint must be supplied for pynfs execution."
+        }
     }
 
     $resolvedEntryPoint = Join-Path $SuiteRoot $EntryPoint
@@ -557,12 +674,47 @@ function Resolve-PynfsCommand {
         throw "The pynfs entry point '$resolvedEntryPoint' does not exist."
     }
 
-    $quotedArguments = @("python3", "/suite/$EntryPoint")
+    if ((-not $EntryPointArguments -or $EntryPointArguments.Count -eq 0) -and [string]::Equals($EntryPoint, "nfs4.0/testserver.py", [System.StringComparison]::Ordinal)) {
+        if ([string]::IsNullOrWhiteSpace($ServerHost) -or [string]::IsNullOrWhiteSpace($ServerPort) -or [string]::IsNullOrWhiteSpace($ExportPath)) {
+            throw "ServerHost, ServerPort, and ExportPath are required when using the default real pynfs NFSv4.0 invocation."
+        }
+
+        $EntryPointArguments = @(
+            "nfs://${ServerHost}:$ServerPort$ExportPath",
+            "--minorversion",
+            "0",
+            "--security",
+            "sys",
+            "--rundeps",
+            "--jsonout",
+            $ResultsJsonPath,
+            "-v",
+            "ROOT1",
+            "LOOKFILE",
+            "GF1r",
+            "GF9",
+            "RD1",
+            "RD8"
+        )
+    }
+
+    $quotedArguments = @("python3", "./$EntryPoint")
     if ($EntryPointArguments) {
         $quotedArguments += $EntryPointArguments
     }
 
-    return ($quotedArguments -join " ")
+    return (($quotedArguments | ForEach-Object { ConvertTo-InteropShellArgument -Value $_ }) -join " ")
+}
+
+function ConvertTo-InteropShellArgument {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        return "''"
+    }
+
+    $escapedSingleQuote = [string]::Concat([char]39, [char]34, [char]39, [char]34, [char]39)
+    return "'" + ($Value -replace "'", $escapedSingleQuote) + "'"
 }
 
 function Invoke-LinuxClientContainer {
@@ -657,11 +809,38 @@ function Invoke-PynfsContainer {
         [int]$ServerPort,
         [string]$ExportPath,
         [int]$MinorVersion,
-        [string]$SuiteCommand
+        [string]$SuiteCommand,
+        [switch]$BootstrapRuntimeSuite
     )
 
     $suiteRootPath = [System.IO.Path]::GetFullPath($SuiteRoot)
     $resultsRootPath = Ensure-InteropDirectory $ResultsDirectory
+    $runtimeSuiteRoot = if ($BootstrapRuntimeSuite) { "/tmp/pynfs-suite" } else { "/suite" }
+    $bootstrapCommand = if ($BootstrapRuntimeSuite) {
+@"
+rm -rf /tmp/pynfs-suite
+mkdir -p /tmp/pynfs-suite
+cp -R /suite/. /tmp/pynfs-suite
+find /tmp/pynfs-suite -type f -size -256c | while read -r placeholder; do
+  link_target=`$(tr -d '\r\n' < "`$placeholder")
+  case "`$link_target" in
+    ../*|../../*)
+      if candidate=`$(cd "`$(dirname "`$placeholder")" && readlink -f "`$link_target" 2>/dev/null); then
+        if [ -e "`$candidate" ]; then
+          rm -f "`$placeholder"
+          ln -s "`$link_target" "`$placeholder"
+        fi
+      fi
+      ;;
+  esac
+done
+cd /tmp/pynfs-suite
+python3 setup.py build_py > /results/bootstrap-stdout.log 2> /results/bootstrap-stderr.log
+"@
+    }
+    else {
+        ""
+    }
 
     $shellCommand = @"
 set -eu
@@ -670,7 +849,8 @@ export OPENNFS_SERVER_HOST="$ServerHost"
 export OPENNFS_SERVER_PORT="$ServerPort"
 export OPENNFS_EXPORT_PATH="$ExportPath"
 export OPENNFS_MINOR_VERSION="$MinorVersion"
-cd /suite
+$bootstrapCommand
+cd $runtimeSuiteRoot
 $SuiteCommand > /results/stdout.log 2> /results/stderr.log
 "@
 

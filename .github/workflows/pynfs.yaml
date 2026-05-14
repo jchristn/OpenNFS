@@ -30,14 +30,15 @@ jobs:
         shell: pwsh
         run: ./scripts/release/Assert-NoSkippedTests.ps1
 
-      - name: Execute or plan pynfs NFSv4.0 integration
+      - name: Execute real pynfs NFSv4.0 integration
         shell: pwsh
         run: |
-          if ($env:PYNFS_ROOT -and $env:PYNFS_ENTRYPOINT) {
-            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot $env:PYNFS_ROOT -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
+          $pynfsRoot = if ($env:PYNFS_ROOT) { $env:PYNFS_ROOT } else { 'scripts/interop/pynfs/external' }
+          if ($env:PYNFS_ENTRYPOINT) {
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot $pynfsRoot -EntryPoint $env:PYNFS_ENTRYPOINT -UseSampleServer
           }
           else {
-            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -PlanOnly -MinorVersion 0 -ServerHost sample-host -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40
+            ./scripts/interop/pynfs/Invoke-Pynfs.ps1 -MinorVersion 0 -ExportPath /exports/sample -ResultsDirectory artifacts/pynfs-v40 -SuiteRoot $pynfsRoot -UseSampleServer
           }
 
       - name: Execute or plan pynfs NFSv4.1 integration

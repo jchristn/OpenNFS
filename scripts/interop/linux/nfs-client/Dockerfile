@@ -6,6 +6,8 @@ RUN apk add --no-cache \
     nfs-utils \
     perl \
     perl-utils \
+    py3-ply \
+    py3-setuptools \
     python3
 
 ENTRYPOINT ["/bin/sh", "-lc"]
