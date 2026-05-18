@@ -1,6 +1,6 @@
 # OpenNFS
 
-OpenNFS is a native C# implementation effort for ONC RPC and NFS. The implementation plan lives in `OPENNFS.md` and is the source of truth for scope, release gates, and progress tracking.
+OpenNFS is a native C# implementation effort for ONC RPC and NFS. Current scope, support-bar notes, and release gates are tracked in this README and in [docs/release-checklist.md](./docs/release-checklist.md).
 
 ## Alpha Status
 
@@ -98,7 +98,6 @@ RDMA remains out of scope for the current release line and may be evaluated as a
 |   `-- Test.Xunit/
 |-- CHANGELOG.md
 |-- LICENSE.md
-|-- OPENNFS.md
 `-- README.md
 ```
 

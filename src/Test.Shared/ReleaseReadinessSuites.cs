@@ -574,10 +574,6 @@ namespace Test.Shared
                     await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "README.md"), cancellationToken).ConfigureAwait(false),
                     cancellationToken).ConfigureAwait(false);
                 await File.WriteAllTextAsync(
-                    Path.Combine(tempRoot, "OPENNFS.md"),
-                    await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "OPENNFS.md"), cancellationToken).ConfigureAwait(false),
-                    cancellationToken).ConfigureAwait(false);
-                await File.WriteAllTextAsync(
                     Path.Combine(tempRoot, "docs", "release-checklist.md"),
                     await File.ReadAllTextAsync(Path.Combine(repositoryRoot, "docs", "release-checklist.md"), cancellationToken).ConfigureAwait(false),
                     cancellationToken).ConfigureAwait(false);

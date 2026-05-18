@@ -11,9 +11,9 @@ namespace Test.Shared.Infrastructure
 
             while (directory != null)
             {
-                string planPath = Path.Combine(directory.FullName, "OPENNFS.md");
-                string sourceDirectory = Path.Combine(directory.FullName, "src");
-                if (File.Exists(planPath) && Directory.Exists(sourceDirectory))
+                string readmePath = Path.Combine(directory.FullName, "README.md");
+                string solutionPath = Path.Combine(directory.FullName, "src", "OpenNFS.sln");
+                if (File.Exists(readmePath) && File.Exists(solutionPath))
                 {
                     return directory.FullName;
                 }
@@ -25,4 +25,3 @@ namespace Test.Shared.Infrastructure
         }
     }
 }
-

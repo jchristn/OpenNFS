@@ -16,10 +16,9 @@ if (-not (Test-Path $RepositoryRoot -PathType Container)) {
 $skipScriptPath = Join-Path $PSScriptRoot "Assert-NoSkippedTests.ps1"
 $checklistScriptPath = Join-Path $PSScriptRoot "Assert-ReleaseChecklist.ps1"
 $readmePath = Join-Path $RepositoryRoot "README.md"
-$openNfsPlanPath = Join-Path $RepositoryRoot "OPENNFS.md"
 $releaseChecklistPath = Join-Path $RepositoryRoot "docs\\release-checklist.md"
 
-foreach ($requiredPath in @($readmePath, $openNfsPlanPath)) {
+foreach ($requiredPath in @($readmePath, $releaseChecklistPath)) {
     if (-not (Test-Path $requiredPath -PathType Leaf)) {
         throw "Required repository-honesty artifact '$requiredPath' does not exist."
     }
@@ -101,9 +100,26 @@ if ($missingReadmeTokens.Count -gt 0) {
     throw "Repository honesty validation failed."
 }
 
-$openNfsPlan = Get-Content -Path $openNfsPlanPath -Raw
-if ($openNfsPlan.IndexOf("Task: Confirm there is no placeholder code, no version overclaim, and no missing mandatory test gate.", [System.StringComparison]::Ordinal) -lt 0) {
-    throw "OPENNFS.md no longer contains the tracked repository-honesty definition-of-done item."
+$releaseChecklist = Get-Content -Path $releaseChecklistPath -Raw
+$requiredChecklistTokens = @(
+    "Use this checklist before any branch claims that a protocol version or security mode is supported.",
+    "No placeholder implementation, placeholder test gate, or skipped conformance requirement remains for any claimed feature."
+)
+
+$missingChecklistTokens = New-Object System.Collections.Generic.List[string]
+foreach ($token in $requiredChecklistTokens) {
+    if ($releaseChecklist.IndexOf($token, [System.StringComparison]::Ordinal) -lt 0) {
+        $missingChecklistTokens.Add($token)
+    }
+}
+
+if ($missingChecklistTokens.Count -gt 0) {
+    Write-Host "Release checklist honesty validation is missing required gate language:" -ForegroundColor Red
+    foreach ($token in $missingChecklistTokens) {
+        Write-Host " - $token"
+    }
+
+    throw "Repository honesty validation failed."
 }
 
 Write-Host "Repository honesty validation passed for '$RepositoryRoot'."

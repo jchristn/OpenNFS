@@ -143,7 +143,8 @@ namespace Test.Shared
             DirectoryInfo? directory = new DirectoryInfo(assemblyDir);
             while (directory is not null)
             {
-                if (File.Exists(Path.Combine(directory.FullName, "OPENNFS.md")))
+                if (File.Exists(Path.Combine(directory.FullName, "README.md"))
+                    && File.Exists(Path.Combine(directory.FullName, "src", "OpenNFS.sln")))
                 {
                     return directory.FullName;
                 }

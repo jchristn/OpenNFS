@@ -344,7 +344,7 @@ namespace Test.Shared.Infrastructure
 
             while (directory is not null)
             {
-                if (File.Exists(Path.Combine(directory.FullName, "OPENNFS.md"))
+                if (File.Exists(Path.Combine(directory.FullName, "README.md"))
                     && File.Exists(Path.Combine(directory.FullName, "src", "OpenNFS.sln")))
                 {
                     repositoryRoot = directory.FullName;

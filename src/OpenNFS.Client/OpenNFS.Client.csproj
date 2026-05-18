@@ -12,6 +12,7 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeInternalRuntimeBuildOutputInPackage</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificDebugSymbolsInPackage>$(TargetsForTfmSpecificDebugSymbolsInPackage);IncludeInternalRuntimeDebugSymbolsInPackage</TargetsForTfmSpecificDebugSymbolsInPackage>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenNFS.Protocol.V40\OpenNFS.Protocol.V40.csproj" />
@@ -46,6 +47,25 @@
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.xml')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.dll')" />
       <BuildOutputInPackage Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.xml')" />
+    </ItemGroup>
+  </Target>
+  <Target Name="IncludeInternalRuntimeDebugSymbolsInPackage" DependsOnTargets="BuildInternalRuntimeProjectsForPackage">
+    <ItemGroup>
+      <TfmSpecificDebugSymbolsFile Include="..\OpenNFS.Rpc\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Rpc.pdb" Condition="Exists('..\OpenNFS.Rpc\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Rpc.pdb')">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
+      <TfmSpecificDebugSymbolsFile Include="..\OpenNFS.Protocol.V3\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V3.pdb" Condition="Exists('..\OpenNFS.Protocol.V3\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V3.pdb')">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
+      <TfmSpecificDebugSymbolsFile Include="..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.pdb" Condition="Exists('..\OpenNFS.Protocol.V40\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V40.pdb')">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
+      <TfmSpecificDebugSymbolsFile Include="..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.pdb" Condition="Exists('..\OpenNFS.Protocol.V41\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V41.pdb')">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
+      <TfmSpecificDebugSymbolsFile Include="..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.pdb" Condition="Exists('..\OpenNFS.Protocol.V42\bin\$(Configuration)\$(TargetFramework)\OpenNFS.Protocol.V42.pdb')">
+        <TargetFramework>$(TargetFramework)</TargetFramework>
+      </TfmSpecificDebugSymbolsFile>
     </ItemGroup>
   </Target>
 </Project>

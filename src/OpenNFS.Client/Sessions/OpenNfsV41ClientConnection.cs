@@ -198,7 +198,7 @@ namespace OpenNFS.Client.Sessions
                 OpenNfsAuthenticationFlavor.AuthSys => CreateAuthSysCredential(authSysCredentials, xid),
                 OpenNfsAuthenticationFlavor.RpcSecGss => throw new OpenNfsClientProtocolException(
                     "RPCSEC_GSS is not available on the current public OpenNFS client surface. "
-                    + "See OPENNFS.md for the remaining security work.",
+                    + "See README.md for the remaining security work.",
                     contextName: nameof(OpenNfsAuthenticationFlavor.RpcSecGss),
                     category: OpenNfsErrorCategory.Unsupported,
                     isRetryable: false,

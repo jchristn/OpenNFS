@@ -7,7 +7,7 @@ OpenNFS uses Touchstone suite descriptors in `Test.Shared`.
 
 ## Naming rules
 
-- Suite identifiers should match the long-term suite families defined in `OPENNFS.md` whenever possible.
+- Suite identifiers should match the long-term suite families documented in `README.md` whenever possible.
 - Case identifiers should be short, stable, and descriptive.
 - Display names should explain observable behavior rather than implementation details.
 - Category tags should come from `Infrastructure/TestCategories.cs`.
