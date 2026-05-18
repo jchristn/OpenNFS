@@ -2,10 +2,17 @@ namespace OpenNFS.TestClient
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
+    using System.Linq;
     using OpenNFS.Client;
 
     internal sealed class ClientConfiguration
     {
+        private const int DefaultMountServerPort = 20048;
+        private MountEndpointMode _mountEndpointMode = MountEndpointMode.DefaultDedicated;
+        private string? _customMountServerHost;
+        private int? _customMountServerPort;
+
         public OpenNfsAuthenticationFlavor AuthenticationFlavor { get; set; } = OpenNfsAuthenticationFlavor.AuthSys;
 
         public string AuthSysMachineName { get; set; } = Environment.MachineName;
@@ -20,15 +27,27 @@ namespace OpenNFS.TestClient
         {
             get
             {
-                return !string.IsNullOrWhiteSpace(MountServerHost) && MountServerPort.HasValue;
+                return _mountEndpointMode != MountEndpointMode.Disabled;
             }
         }
 
-        public string? MountServerHost { get; private set; }
+        public string? MountServerHost => _mountEndpointMode switch
+        {
+            MountEndpointMode.Disabled => null,
+            MountEndpointMode.Custom => _customMountServerHost,
+            _ => ServerHost,
+        };
 
-        public int? MountServerPort { get; private set; }
+        public int? MountServerPort => _mountEndpointMode switch
+        {
+            MountEndpointMode.Disabled => null,
+            MountEndpointMode.Custom => _customMountServerPort,
+            _ => DefaultMountServerPort,
+        };
 
-        public string ServerHost { get; set; } = "localhost";
+        public string PreferredExportPath { get; set; } = "/exports/test";
+
+        public string ServerHost { get; set; } = "127.0.0.1";
 
         public int ServerPort { get; set; } = 2049;
 
@@ -36,8 +55,9 @@ namespace OpenNFS.TestClient
 
         public void ClearMountEndpoint()
         {
-            MountServerHost = null;
-            MountServerPort = null;
+            _mountEndpointMode = MountEndpointMode.Disabled;
+            _customMountServerHost = null;
+            _customMountServerPort = null;
         }
 
         public void SetMountEndpoint(string host, int port)
@@ -52,8 +72,61 @@ namespace OpenNFS.TestClient
                 throw new ArgumentOutOfRangeException(nameof(port), "Port values must be between 1 and 65535.");
             }
 
-            MountServerHost = host;
-            MountServerPort = port;
+            _mountEndpointMode = MountEndpointMode.Custom;
+            _customMountServerHost = host;
+            _customMountServerPort = port;
+        }
+
+        public string GetAuthenticationFlavorDisplay()
+        {
+            return AuthenticationFlavor switch
+            {
+                OpenNfsAuthenticationFlavor.AuthNone => "none",
+                OpenNfsAuthenticationFlavor.AuthSys => "authsys",
+                OpenNfsAuthenticationFlavor.RpcSecGss => "rpcsecgss",
+                _ => AuthenticationFlavor.ToString(),
+            };
+        }
+
+        public string GetAuthSysDisplay()
+        {
+            string groups = AuthSysSupplementaryGroupIds.Count == 0
+                ? "(none)"
+                : string.Join(
+                    ",",
+                    AuthSysSupplementaryGroupIds.Select(static value => value.ToString(CultureInfo.InvariantCulture)));
+            return "machine="
+                + AuthSysMachineName
+                + ", uid="
+                + AuthSysUserId.ToString(CultureInfo.InvariantCulture)
+                + ", gid="
+                + AuthSysGroupId.ToString(CultureInfo.InvariantCulture)
+                + ", groups="
+                + groups;
+        }
+
+        public string GetMountEndpointDisplay()
+        {
+            return HasExplicitMountEndpoint && MountServerHost is not null && MountServerPort.HasValue
+                ? MountServerHost + ":" + MountServerPort.Value.ToString(CultureInfo.InvariantCulture)
+                : "primary endpoint";
+        }
+
+        public string GetPrimaryEndpointDisplay()
+        {
+            return ServerHost + ":" + ServerPort.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public string GetTransportDisplay()
+        {
+            return TransportPolicy == OpenNfsClientTransportPolicy.TcpOnly ? "tcp" : "tcpudp";
+        }
+
+        private enum MountEndpointMode
+        {
+            DefaultDedicated,
+            Custom,
+            Disabled,
         }
     }
 }

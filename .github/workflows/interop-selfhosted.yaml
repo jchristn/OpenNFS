@@ -34,25 +34,17 @@ jobs:
         shell: pwsh
         run: ./scripts/interop/Invoke-PrivilegedInterop.ps1 -ResultsDirectory artifacts/interop-privileged
 
-      - name: Execute or plan pjdfstest integration
+      - name: Execute pjdfstest integration
         shell: pwsh
         run: |
-          if ($env:PJDFSTEST_ROOT) {
-            ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest -SuiteRoot $env:PJDFSTEST_ROOT -Subset core -UseSampleServer
-          }
-          else {
-            ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest
-          }
+          $pjdfstestRoot = if ($env:PJDFSTEST_ROOT) { $env:PJDFSTEST_ROOT } else { 'scripts/interop/pjdfstest/external' }
+          ./scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/pjdfstest -SuiteRoot $pjdfstestRoot -Subset core -UseSampleServer
 
-      - name: Execute or plan Connectathon integration
+      - name: Execute Connectathon integration
         shell: pwsh
         run: |
-          if ($env:CONNECTATHON_ROOT) {
-            ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon -SuiteRoot $env:CONNECTATHON_ROOT -Subset general -UseSampleServer
-          }
-          else {
-            ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -PlanOnly -ProtocolVersion NfsV3 -ServerHost sample-host -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon
-          }
+          $connectathonRoot = if ($env:CONNECTATHON_ROOT) { $env:CONNECTATHON_ROOT } else { 'scripts/interop/connectathon/external' }
+          ./scripts/interop/connectathon/Invoke-Connectathon.ps1 -ProtocolVersion NfsV3 -ExportPath /exports/sample -MountPoint /mnt/opennfs -ResultsDirectory artifacts/connectathon -SuiteRoot $connectathonRoot -Subset general -UseSampleServer
 
       - name: Execute real pynfs NFSv4.0 integration
         shell: pwsh

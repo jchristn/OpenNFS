@@ -10,6 +10,9 @@ namespace OpenNFS.TestServer
 
     internal static class ServerBackingStoreSupport
     {
+        private static readonly UTF8Encoding Utf8WithoutBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        private static readonly byte[] Utf8Bom = Encoding.UTF8.GetPreamble();
+
         internal static void ShowBackingTree()
         {
             EnsureBackingStoreReady();
@@ -36,7 +39,7 @@ namespace OpenNFS.TestServer
             }
 
             string content = ReadMultilineBlock("Enter file contents. Finish with a single line containing only '.'");
-            File.WriteAllText(fullPath, content, Encoding.UTF8);
+            File.WriteAllText(fullPath, content, Utf8WithoutBom);
             Console.WriteLine("[OK] Wrote " + fullPath + ".");
         }
 
@@ -145,8 +148,26 @@ namespace OpenNFS.TestServer
         {
             if (!File.Exists(path))
             {
-                File.WriteAllText(path, content, Encoding.UTF8);
+                File.WriteAllText(path, content, Utf8WithoutBom);
+                return;
             }
+
+            if (IsLegacyBomSeedFile(path, content))
+            {
+                File.WriteAllText(path, content, Utf8WithoutBom);
+            }
+        }
+
+        private static bool IsLegacyBomSeedFile(string path, string expectedContent)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            if (bytes.Length < Utf8Bom.Length || !bytes.AsSpan(0, Utf8Bom.Length).SequenceEqual(Utf8Bom))
+            {
+                return false;
+            }
+
+            string decoded = Encoding.UTF8.GetString(bytes, Utf8Bom.Length, bytes.Length - Utf8Bom.Length);
+            return string.Equals(decoded, expectedContent, StringComparison.Ordinal);
         }
     }
 }

@@ -116,9 +116,10 @@ namespace OpenNFS.TestClient
                 throw new InvalidOperationException("An export is already mounted. Use umount before mounting another export.");
             }
 
-            string exportPath = arguments.Count > 1 ? arguments[1] : ReadRequiredValue("Export path");
+            string exportPath = arguments.Count > 1 ? arguments[1] : Configuration.PreferredExportPath;
             Session = await client.MountAsync(exportPath, cancellationToken).ConfigureAwait(false);
             MountedExportPath = Session.ExportPath;
+            Configuration.PreferredExportPath = Session.ExportPath;
             CurrentDirectory = "/";
             Console.WriteLine("[OK] Mounted " + MountedExportPath + ".");
         }

@@ -168,7 +168,9 @@ namespace Test.Shared
                                 || !hostedWorkflow.Contains("-UseSampleServer", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("Invoke-PrivilegedInterop.ps1", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:PJDFSTEST_ROOT", StringComparison.Ordinal)
+                                || !selfHostedWorkflow.Contains("scripts/interop/pjdfstest/external", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:CONNECTATHON_ROOT", StringComparison.Ordinal)
+                                || !selfHostedWorkflow.Contains("scripts/interop/connectathon/external", StringComparison.Ordinal)
                                 || !selfHostedWorkflow.Contains("$env:PYNFS_ROOT", StringComparison.Ordinal)
                                 || !pynfsWorkflow.Contains("$env:PYNFS_ENTRYPOINT", StringComparison.Ordinal))
                             {

@@ -176,40 +176,40 @@ namespace OpenNFS.TestClient
         {
             Console.WriteLine();
             Console.WriteLine("Available commands:");
-            Console.WriteLine("  ? / help                show this menu");
-            Console.WriteLine("  q / quit / exit         quit");
-            Console.WriteLine("  cls / clear             clear the screen");
-            Console.WriteLine("  show                    show current client configuration and mount state");
+            WriteCommandLine("? / help", "show this menu");
+            WriteCommandLine("q / quit / exit", "quit");
+            WriteCommandLine("cls / clear", "clear the screen");
+            WriteCommandLine("show", "show current client configuration and mount state");
             Console.WriteLine();
             Console.WriteLine("Configuration:");
-            Console.WriteLine("  server [host] [port]                    set the primary NFS endpoint");
-            Console.WriteLine("  mountendpoint [host] [port]             set the dedicated MOUNT v3 endpoint");
-            Console.WriteLine("  mountendpoint clear                     clear the dedicated MOUNT endpoint");
-            Console.WriteLine("  transport [tcp|tcpudp]                  set the transport policy");
-            Console.WriteLine("  auth [none|authsys|rpcsecgss]           set the authentication flavor");
-            Console.WriteLine("  authsys [machine] [uid] [gid] [groups]  set AUTH_SYS identity values");
+            WriteCommandLine("server [host] [port]", "set the primary NFS endpoint", Configuration.GetPrimaryEndpointDisplay());
+            WriteCommandLine("mountendpoint [host] [port]", "set the dedicated MOUNT v3 endpoint", Configuration.GetMountEndpointDisplay());
+            WriteCommandLine("mountendpoint clear", "clear the dedicated MOUNT endpoint");
+            WriteCommandLine("transport [tcp|tcpudp]", "set the transport policy", Configuration.GetTransportDisplay());
+            WriteCommandLine("auth [none|authsys|rpcsecgss]", "set the authentication flavor", Configuration.GetAuthenticationFlavorDisplay());
+            WriteCommandLine("authsys [machine] [uid] [gid] [groups]", "set AUTH_SYS identity values", Configuration.GetAuthSysDisplay());
             Console.WriteLine();
             Console.WriteLine("Connection and export bootstrap:");
-            Console.WriteLine("  connect                  build and open the client");
-            Console.WriteLine("  disconnect               close and dispose the client");
-            Console.WriteLine("  exports                  list available exports through MOUNT v3");
-            Console.WriteLine("  mounts                   list current server mount records through MOUNT v3");
-            Console.WriteLine("  mount [exportPath]       mount an export and open a path-first session");
-            Console.WriteLine("  umount                   unmount the current export and close the session");
+            WriteCommandLine("connect", "build and open the client");
+            WriteCommandLine("disconnect", "close and dispose the client");
+            WriteCommandLine("exports", "list available exports through MOUNT v3");
+            WriteCommandLine("mounts", "list current server mount records through MOUNT v3");
+            WriteCommandLine("mount [exportPath]", "mount an export and open a path-first session", Configuration.PreferredExportPath);
+            WriteCommandLine("umount", "unmount the current export and close the session");
             Console.WriteLine();
             Console.WriteLine("Mounted-session operations:");
-            Console.WriteLine("  pwd                      show the current export-relative directory");
-            Console.WriteLine("  cd [path]                change the current export-relative directory");
-            Console.WriteLine("  ls [path]                list directory contents");
-            Console.WriteLine("  stat [path]              show file or directory metadata");
-            Console.WriteLine("  cat [path]               read and print a UTF-8 file");
-            Console.WriteLine("  write [path]             overwrite a file with prompted UTF-8 text");
-            Console.WriteLine("  touch [path]             create a file if it does not exist");
-            Console.WriteLine("  mkdir [path]             create a directory");
-            Console.WriteLine("  rm [path]                delete a file");
-            Console.WriteLine("  rmdir [path]             delete an empty directory");
-            Console.WriteLine("  put [local] [remote]     upload a local file");
-            Console.WriteLine("  get [remote] [local]     download a remote file");
+            WriteCommandLine("pwd", "show the current export-relative directory");
+            WriteCommandLine("cd [path]", "change the current export-relative directory");
+            WriteCommandLine("ls [path]", "list directory contents");
+            WriteCommandLine("stat [path]", "show file or directory metadata");
+            WriteCommandLine("cat [path]", "read and print a UTF-8 file");
+            WriteCommandLine("write [path]", "overwrite a file with prompted UTF-8 text");
+            WriteCommandLine("touch [path]", "create a file if it does not exist");
+            WriteCommandLine("mkdir [path]", "create a directory");
+            WriteCommandLine("rm [path]", "delete a file");
+            WriteCommandLine("rmdir [path]", "delete an empty directory");
+            WriteCommandLine("put [local] [remote]", "upload a local file");
+            WriteCommandLine("get [remote] [local]", "download a remote file");
             Console.WriteLine();
             Console.WriteLine("Notes:");
             Console.WriteLine("  - The current test client exercises the best-covered NFSv3 mounted-session path.");
@@ -222,15 +222,8 @@ namespace OpenNFS.TestClient
         {
             Console.WriteLine();
             Console.WriteLine("Client configuration:");
-            Console.WriteLine("  Primary endpoint : " + Configuration.ServerHost + ":" + Configuration.ServerPort.ToString(CultureInfo.InvariantCulture));
-            if (Configuration.HasExplicitMountEndpoint)
-            {
-                Console.WriteLine("  MOUNT endpoint   : " + Configuration.MountServerHost + ":" + Configuration.MountServerPort!.Value.ToString(CultureInfo.InvariantCulture));
-            }
-            else
-            {
-                Console.WriteLine("  MOUNT endpoint   : primary endpoint");
-            }
+            Console.WriteLine("  Primary endpoint : " + Configuration.GetPrimaryEndpointDisplay());
+            Console.WriteLine("  MOUNT endpoint   : " + Configuration.GetMountEndpointDisplay());
 
             Console.WriteLine("  Transport        : " + Configuration.TransportPolicy);
             Console.WriteLine("  Auth flavor      : " + Configuration.AuthenticationFlavor);
@@ -442,9 +435,10 @@ namespace OpenNFS.TestClient
                 throw new InvalidOperationException("An export is already mounted. Use umount before mounting another export.");
             }
 
-            string exportPath = arguments.Count > 1 ? arguments[1] : ReadRequiredValue("Export path");
+            string exportPath = arguments.Count > 1 ? arguments[1] : Configuration.PreferredExportPath;
             _session = await client.MountAsync(exportPath, cancellationToken).ConfigureAwait(false);
             _mountedExportPath = _session.ExportPath;
+            Configuration.PreferredExportPath = _session.ExportPath;
             _currentDirectory = "/";
             Console.WriteLine("[OK] Mounted " + _mountedExportPath + ".");
         }
@@ -893,6 +887,17 @@ namespace OpenNFS.TestClient
             DateTimeOffset dateTimeOffset = DateTimeOffset.FromUnixTimeSeconds(value.Seconds)
                 .AddTicks(value.Nanoseconds / 100U);
             return dateTimeOffset.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        private static void WriteCommandLine(string command, string description, string? currentValue = null)
+        {
+            string line = "  " + command.PadRight(40) + description;
+            if (!string.IsNullOrWhiteSpace(currentValue))
+            {
+                line += " (current: " + currentValue + ")";
+            }
+
+            Console.WriteLine(line);
         }
     }
 

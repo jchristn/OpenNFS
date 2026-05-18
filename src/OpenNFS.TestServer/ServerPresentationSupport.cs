@@ -10,41 +10,41 @@ namespace OpenNFS.TestServer
         {
             Console.WriteLine();
             Console.WriteLine("Available commands:");
-            Console.WriteLine("  ? / help              show this menu");
-            Console.WriteLine("  q / quit / exit       quit");
-            Console.WriteLine("  cls / clear           clear the screen");
-            Console.WriteLine("  show                  show server configuration and runtime state");
+            WriteCommandLine("? / help", "show this menu");
+            WriteCommandLine("q / quit / exit", "quit");
+            WriteCommandLine("cls / clear", "clear the screen");
+            WriteCommandLine("show", "show server configuration and runtime state");
             Console.WriteLine();
             Console.WriteLine("Listener and export configuration:");
-            Console.WriteLine("  server [name]         set the server display name");
-            Console.WriteLine("  address [value]       set the listener address");
-            Console.WriteLine("  mountport [port]      set the MOUNT v3 TCP port (0 allowed)");
-            Console.WriteLine("  nfsport [port]        set the NFSv3 TCP port (0 allowed)");
-            Console.WriteLine("  nfs40port [port]      set the NFSv4.0 TCP port (0 allowed)");
-            Console.WriteLine("  nfs41port [port]      set the NFSv4.1 TCP port (0 allowed)");
-            Console.WriteLine("  nfs42port [port]      set the NFSv4.2 TCP port (0 allowed)");
-            Console.WriteLine("  export [path]         set the client-visible export path");
-            Console.WriteLine("  readonly [on|off]     toggle read-only export mode");
-            Console.WriteLine("  denymounts [on|off]   toggle explicit mount denial");
-            Console.WriteLine("  v3 [on|off]           enable or disable the NFSv3-era listener surface");
-            Console.WriteLine("  v40 [on|off]          enable or disable the NFSv4.0 listener surface");
-            Console.WriteLine("  v41 [on|off]          enable or disable the NFSv4.1 session-management surface");
-            Console.WriteLine("  v42 [on|off]          enable or disable the initial NFSv4.2 listener surface");
-            Console.WriteLine("  preserve [on|off]     preserve the temporary backing store on exit");
+            WriteCommandLine("server [name]", "set the server display name", Configuration.ServerName);
+            WriteCommandLine("address [value]", "set the listener address", Configuration.ListenerAddress);
+            WriteCommandLine("mountport [port]", "set the MOUNT v3 TCP port (0 allowed)", Configuration.MountPort.ToString(CultureInfo.InvariantCulture));
+            WriteCommandLine("nfsport [port]", "set the NFSv3 TCP port (0 allowed)", Configuration.NfsPort.ToString(CultureInfo.InvariantCulture));
+            WriteCommandLine("nfs40port [port]", "set the NFSv4.0 TCP port (0 allowed)", Configuration.Nfs40Port.ToString(CultureInfo.InvariantCulture));
+            WriteCommandLine("nfs41port [port]", "set the NFSv4.1 TCP port (0 allowed)", Configuration.Nfs41Port.ToString(CultureInfo.InvariantCulture));
+            WriteCommandLine("nfs42port [port]", "set the NFSv4.2 TCP port (0 allowed)", Configuration.Nfs42Port.ToString(CultureInfo.InvariantCulture));
+            WriteCommandLine("export [path]", "set the client-visible export path", Configuration.ExportPath);
+            WriteCommandLine("readonly [on|off]", "toggle read-only export mode", FormatToggle(Configuration.ReadOnly));
+            WriteCommandLine("denymounts [on|off]", "toggle explicit mount denial", FormatToggle(Configuration.DenyMounts));
+            WriteCommandLine("v3 [on|off]", "enable or disable the NFSv3-era listener surface", FormatToggle(Configuration.EnableNfsV3));
+            WriteCommandLine("v40 [on|off]", "enable or disable the NFSv4.0 listener surface", FormatToggle(Configuration.EnableNfsV40));
+            WriteCommandLine("v41 [on|off]", "enable or disable the NFSv4.1 session-management surface", FormatToggle(Configuration.EnableNfsV41));
+            WriteCommandLine("v42 [on|off]", "enable or disable the initial NFSv4.2 listener surface", FormatToggle(Configuration.EnableNfsV42));
+            WriteCommandLine("preserve [on|off]", "preserve the temporary backing store on exit", FormatToggle(Configuration.PreserveOnExit));
             Console.WriteLine();
             Console.WriteLine("Backing store helpers:");
-            Console.WriteLine("  root                  show the temporary backing-store path");
-            Console.WriteLine("  seed                  ensure sample seed content exists");
-            Console.WriteLine("  tree                  show the current backing-store tree");
-            Console.WriteLine("  mkdir [path]          create a backing-store directory");
-            Console.WriteLine("  write [path]          write a UTF-8 backing-store file");
-            Console.WriteLine("  delete [path]         delete a backing-store file or directory");
-            Console.WriteLine("  resetroot             clear and reseed the temporary backing store");
+            WriteCommandLine("root", "show the temporary backing-store path");
+            WriteCommandLine("seed", "ensure sample seed content exists");
+            WriteCommandLine("tree", "show the current backing-store tree");
+            WriteCommandLine("mkdir [path]", "create a backing-store directory");
+            WriteCommandLine("write [path]", "write a UTF-8 backing-store file");
+            WriteCommandLine("delete [path]", "delete a backing-store file or directory");
+            WriteCommandLine("resetroot", "clear and reseed the temporary backing store");
             Console.WriteLine();
             Console.WriteLine("Server lifecycle:");
-            Console.WriteLine("  start                 start the server");
-            Console.WriteLine("  stop                  stop the server");
-            Console.WriteLine("  restart               restart the server");
+            WriteCommandLine("start", "start the server");
+            WriteCommandLine("stop", "stop the server");
+            WriteCommandLine("restart", "restart the server");
             Console.WriteLine();
             Console.WriteLine("Notes:");
             Console.WriteLine("  - The backing store is a temporary local directory with persistent filehandle mappings.");
@@ -90,6 +90,22 @@ namespace OpenNFS.TestServer
             }
 
             Console.WriteLine();
+        }
+
+        private static string FormatToggle(bool value)
+        {
+            return value ? "on" : "off";
+        }
+
+        private static void WriteCommandLine(string command, string description, string? currentValue = null)
+        {
+            string line = "  " + command.PadRight(30) + description;
+            if (!string.IsNullOrWhiteSpace(currentValue))
+            {
+                line += " (current: " + currentValue + ")";
+            }
+
+            Console.WriteLine(line);
         }
     }
 }

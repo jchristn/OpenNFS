@@ -13,6 +13,6 @@
     <ContinuousIntegrationBuild Condition="'$(CI)' != ''">true</ContinuousIntegrationBuild>
     <Authors>OpenNFS Contributors</Authors>
     <Company>OpenNFS</Company>
-    <Version>0.1.0-alpha.1</Version>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>

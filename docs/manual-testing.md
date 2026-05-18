@@ -1,5 +1,7 @@
 # Manual Testing
 
+This guide targets the current ALPHA repository state. Commands, defaults, and workflow expectations are subject to change, and only very limited compatibility testing has been done relative to the eventual support bar.
+
 This repository is ready for manual testing on its best-covered path today:
 
 - `Sample.OpenNfsServer` as the runnable server.
@@ -79,4 +81,4 @@ Script rules:
 - The strongest manual path is still the mounted-session NFSv3 client flow.
 - The public runnable server surface currently exposes NFSv3-era listeners and NFSv4.0, not a sample-hosted v4.1 or v4.2 wire surface.
 - The public menu client does not yet implement RPCSEC_GSS client flows; Kerberos work in this repo is currently server-side and harness-oriented.
-- External conformance (`pjdfstest`, Connectathon, `pynfs`) is still open, so manual success here is not a release-support claim.
+- Passing archived conformance subsets now exist for `pjdfstest`, Connectathon, and `pynfs`, but manual success here is still not a release-support claim by itself.

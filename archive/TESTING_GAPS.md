@@ -19,7 +19,7 @@ That is a strong start, but it is still below the repo's own support bar:
 
 - `OPENNFS.md` says `pjdfstest` plus Connectathon-style mounted suites are required for mounted semantics and v3 locking claims.
 - `OPENNFS.md` says `pynfs` is required for NFSv4.0 and NFSv4.1 conformance and negative-path coverage.
-- `README.md` and `OPENNFS.md` both explicitly say those external conformance suites are not yet running/passing and that the repo is not yet making a support claim.
+- The repo still is not making a release-branch support claim, but that is now because broader optional surfaces and privileged-branch enforcement remain open, not because the first archived `pjdfstest`, Connectathon, and `pynfs` subsets are missing.
 
 ## Requested Questions
 
@@ -61,7 +61,7 @@ Covered today:
 Why this is not yet adequate for full interop:
 
 - There is no `InteropSuites` peer matrix for NFSv4.2.
-- The external conformance gates required by `OPENNFS.md` are still open.
+- The first archived external conformance gates are now implemented and validated, but broader future support claims could still require additional subset expansion.
 
 ### 3. Is `OpenNFS.Server` adequately tested against a live Docker NFS client?
 
@@ -102,7 +102,7 @@ Covered today:
 Why this is not yet adequate for full interop:
 
 - No NFSv4.2 peer interop matrix.
-- External conformance gates are still open.
+- External conformance is no longer the primary open gate for the current archived surface; remaining open work is mostly support-bar scope and privileged CI enforcement.
 
 ## Concrete Gaps To Close
 
@@ -140,9 +140,9 @@ Current prerequisite state: the earlier local build blockers are cleared in the 
 
 ## CI / Harness Gaps
 
-- `.github/workflows/interop-hosted.yaml` now runs real vendored `pynfs` v4.0 and v4.1 subsets, but its `pjdfstest` and Connectathon steps still stop at synthetic smoke plus plan-only external execution.
-- `.github/workflows/interop-selfhosted.yaml` can execute real `pjdfstest`, Connectathon, and `pynfs`, but the mounted `pjdfstest` and Connectathon paths still depend on runner-provided external suite roots.
-- The self-hosted conformance workflow is not the same as having those suites passing as unconditional PR gates.
+- `.github/workflows/interop-hosted.yaml` now runs real vendored `pynfs` v4.0 and v4.1 subsets, but its `pjdfstest` and Connectathon steps still stop at synthetic smoke plus plan-only external execution because hosted runners are not the privileged mounted-suite environment.
+- `.github/workflows/interop-selfhosted.yaml` now executes real vendored `pjdfstest`, Connectathon, and `pynfs` by default, with env vars remaining only as override hooks.
+- The self-hosted conformance workflow is still not the same as having those suites enforced as unconditional PR gates or release-branch branch-protection checks.
 
 ## Evidence Pointers
 

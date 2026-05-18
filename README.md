@@ -2,9 +2,17 @@
 
 OpenNFS is a native C# implementation effort for ONC RPC and NFS. The implementation plan lives in `OPENNFS.md` and is the source of truth for scope, release gates, and progress tracking.
 
+## Alpha Status
+
+OpenNFS is an ALPHA repository.
+
+- The current package/version line is `v0.1.0`, but that is not a stability or support claim.
+- Public APIs, runtime behavior, interoperability coverage, CI workflows, and documentation are all subject to change without notice.
+- Only very limited compatibility testing has been done relative to the eventual support bar. Passing local suites, direct-peer tests, Linux peer checks, or archived subset conformance runs does not imply broad protocol, platform, kernel, or client/server compatibility.
+
 ## Current status
 
-This repository is in active implementation.
+This repository is in active implementation and remains alpha.
 
 - `OpenNFS.Server` and `OpenNFS.Client` are the intended public packages.
 - No protocol version is yet claimed as supported on a release branch.
@@ -17,8 +25,9 @@ This repository is in active implementation.
 - NFSv4.2 capability-gated operation surface is now wired at the typed processor level. `INfsSparse` and `INfsCopyClone` are real host capability contracts with `SeekAsync`/`AllocateAsync`/`DeallocateAsync`/`ReadSparseAsync` and `CopyAsync`/`CloneAsync`. The typed `Nfs42SparseFileProcessor`, `Nfs42CopyCloneProcessor`, and `Nfs42AdvisoryOperationsProcessor` route every advertised v4.2 op in scope (`SEEK`, `ALLOCATE`, `DEALLOCATE`, `READ_PLUS`, `COPY`, `CLONE`, `IO_ADVISE`, `OFFLOAD_CANCEL`, `OFFLOAD_STATUS`, `WRITE_SAME`, `COPY_NOTIFY`) to the host capability or surface a standards-compliant `NFS4ERR_NOTSUPP` when the host has not opted in. This is not an NFSv4.2 release-support claim until live peer interop and applicable `pynfs` coverage pass.
 - RPCSEC_GSS credential / context / sequence / wrap-unwrap / verifier handling is wired end-to-end through a real Kerberos provider. `OpenNfsKerberosMechanism` (in `OpenNFS.Rpc/Security/Kerberos/`) implements `IRpcSecGssMechanism` over `System.Net.Security.NegotiateAuthentication` with `Package = "Kerberos"`. The repository ships a self-contained Dockerized MIT KDC with three principals and exported keytabs, plus a `Run-Probe.ps1` runner that exercises the provider end-to-end against the live KDC. The named acceptance Touchstone gates `Krb5ReadWrite`, `Krb5iDetectsTamper`, `Krb5pEncryptsPayload`, `RpcSecGssContextEstablishment`, `RpcSecGssSequenceWindow`, and `RpcSecGssIntegrityFailureRejected` all pass. See the [RPCSEC_GSS / Kerberos setup](#rpcsec_gss--kerberos-setup) section for the full bootstrap.
 - The repository is multi-targeted `net8.0;net10.0`. `krb5p` (privacy via `Wrap`/`Unwrap`) works on both target frameworks. `krb5` and `krb5i` (which need `GSS_GetMIC`/`GSS_VerifyMIC`) require the `net10.0` build because those APIs land in net10 only.
-- Broader conformance, CI-hosted interop, wider Linux peer matrices, and release-gate work are still open, so this is not yet a release-support claim.
-- Release-readiness automation now includes a formal [release checklist](./docs/release-checklist.md), source-level skipped-test enforcement, a repository-honesty validator, workflow scaffolding for hosted and privileged interop, and plan-mode harness entry points for `pjdfstest`, Connectathon, and `pynfs`. Those external suites are not yet passing, so the related conformance milestones remain open.
+- No protocol version is yet claimed as supported on a release branch.
+- Archived real conformance evidence now exists for `pjdfstest` NFSv3 `core`, Connectathon `general`, `pynfs` NFSv4.0, and an initial `pynfs` NFSv4.1 session-management subset. This is still not a release-support claim: broader optional surfaces such as v3 locking and v4.1 callback scenarios are not yet part of the passing release bar, and the privileged CI / release-branch enforcement path is still administrative rather than code-complete.
+- Release-readiness automation now includes a formal [release checklist](./docs/release-checklist.md), source-level skipped-test enforcement, a repository-honesty validator, vendored conformance harnesses for `pjdfstest`, Connectathon, and `pynfs`, and workflow scaffolding for hosted and privileged interop. The release gate validates fresh non-synthetic conformance manifests, but no protocol version is described as supported until every applicable checklist item is enforced on the release branch with evidence.
 - The current additive compatibility pass introduces `WithServer(...)`, `ConnectAsync(...)` / `DisconnectAsync(...)`, `MountAsync(...)`, explicit MOUNT endpoint configuration for NFSv3, grouped `Exports` helpers that honor that bootstrap endpoint for export enumeration and mount flows, `OpenNfsMountSession` for path-first mounted-export work, and the server-side `OpenNfsServerBuilder.BuildApplication()` / `OpenNfsServerApplication` wrapper for the default runnable server journey. `ConnectAsync(...)` is now explicitly a lifetime-open step rather than an eager reachability probe, and the raw planning/execution entry points remain available as explicitly advanced members in the public API surface.
 - The primary client path now also has a bounded OpenCIFS-aligned typed error and non-throwing result layer: `TryConnectAsync(...)`, `TryDisconnectAsync(...)`, `TryMountAsync(...)`, and the new `Exports.Try...Async(...)` bootstrap helpers return `OpenNfsClientResult` / `OpenNfsClientResult<T>`, while the throwing path now surfaces typed `OpenNfsClientStateException`, `OpenNfsClientProtocolException`, `OpenNfsClientIoException`, `OpenNfsMountV3StatusException`, and `OpenNfsV3StatusException` failures with normalized `OpenNfsErrorCategory` values. Broader grouped/server parity and NFSv4 partial-success envelopes remain open.
 - The managed server lifecycle now also has a bounded OpenCIFS-aligned non-throwing layer: `OpenNfsServerApplication.TryRunAsync(...)`, `TryStartAsync(...)`, and `TryStopAsync(...)` return `OpenNfsServerResult` and preserve typed `OpenNfsServerStateException` failures for duplicate starts, bind conflicts, and disposed-application misuse.
@@ -115,7 +124,7 @@ When the local Docker daemon is reachable, the shared runners also execute the D
 
 `Test.Automated` now also accepts repeated `--suite <SuiteId>` filters for targeted validation when you only need the suites touched by a slice instead of the full matrix.
 
-The formal support-claim gate is tracked in [docs/release-checklist.md](./docs/release-checklist.md). The release scripts now validate that checklist, ban explicit skipped-test markers in source, validate that the repo still carries the required no-overclaim disclaimers and no placeholder markers in implementation code, and emit the current local plus external conformance plan without claiming that `pjdfstest`, Connectathon, or `pynfs` are already passing.
+The formal support-claim gate is tracked in [docs/release-checklist.md](./docs/release-checklist.md). The release scripts now validate that checklist, ban explicit skipped-test markers in source, validate that the repo still carries the required no-overclaim disclaimers and no placeholder markers in implementation code, and require fresh non-synthetic conformance manifests for `pjdfstest`, Connectathon, and `pynfs` before a support claim can advance.
 
 The shared compatibility coverage also compiles the canonical README client and server snippets against clean packaged consumer apps, while the packaged-consumer and sample/interop suites execute the equivalent runtime flows against real peers.
 

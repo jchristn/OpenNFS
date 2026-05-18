@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
+
+This `v0.1.0` line is still an alpha baseline, not a stability or support claim.
 
 - Established the repository baseline, solution structure, and central .NET build configuration.
 - Added the initial public configuration surfaces for `OpenNFS.Server` and `OpenNFS.Client`.
