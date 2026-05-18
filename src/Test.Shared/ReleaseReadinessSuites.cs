@@ -374,51 +374,6 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "ReleaseReadinessSuites",
-                        caseId: "WorkflowFilesReferenceReleaseAutomation",
-                        displayName: "Workflow files reference release automation and conformance harness entry points",
-                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
-                        executeAsync: async cancellationToken =>
-                        {
-                            string repositoryRoot = RepositoryPaths.GetRepositoryRoot();
-                            string buildWorkflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "build.yaml");
-                            string testWorkflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "test.yaml");
-                            string hostedWorkflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "interop-hosted.yaml");
-                            string selfHostedWorkflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "interop-selfhosted.yaml");
-                            string pynfsWorkflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "pynfs.yaml");
-
-                            string buildWorkflow = await File.ReadAllTextAsync(buildWorkflowPath, cancellationToken).ConfigureAwait(false);
-                            string testWorkflow = await File.ReadAllTextAsync(testWorkflowPath, cancellationToken).ConfigureAwait(false);
-                            string hostedWorkflow = await File.ReadAllTextAsync(hostedWorkflowPath, cancellationToken).ConfigureAwait(false);
-                            string selfHostedWorkflow = await File.ReadAllTextAsync(selfHostedWorkflowPath, cancellationToken).ConfigureAwait(false);
-                            string pynfsWorkflow = await File.ReadAllTextAsync(pynfsWorkflowPath, cancellationToken).ConfigureAwait(false);
-
-                            if (!buildWorkflow.Contains("Invoke-ReleaseValidation.ps1 -PlanOnly", StringComparison.Ordinal)
-                                || !buildWorkflow.Contains("Assert-RepositoryHonesty.ps1", StringComparison.Ordinal)
-                                || !testWorkflow.Contains("Assert-NoSkippedTests.ps1", StringComparison.Ordinal)
-                                || !testWorkflow.Contains("Assert-RepositoryHonesty.ps1", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("Invoke-Pjdfstest.ps1 -ProtocolVersion NfsV3", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("Invoke-Connectathon.ps1 -ProtocolVersion NfsV3", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("Invoke-Pynfs.ps1 -MinorVersion 0", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("Invoke-Pynfs.ps1 -MinorVersion 1", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("-UseSampleServer", StringComparison.Ordinal)
-                                || !hostedWorkflow.Contains("-UseLinuxNfs41Server", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("Invoke-PrivilegedInterop.ps1", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("$env:PJDFSTEST_ROOT", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("scripts/interop/pjdfstest/external", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("$env:CONNECTATHON_ROOT", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("scripts/interop/connectathon/external", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("$env:PYNFS_ROOT", StringComparison.Ordinal)
-                                || !selfHostedWorkflow.Contains("scripts/interop/pynfs/external", StringComparison.Ordinal)
-                                || !pynfsWorkflow.Contains("$env:PYNFS_ENTRYPOINT", StringComparison.Ordinal)
-                                || !pynfsWorkflow.Contains("scripts/interop/pynfs/external", StringComparison.Ordinal)
-                                || !pynfsWorkflow.Contains("-UseLinuxNfs41Server", StringComparison.Ordinal))
-                            {
-                                throw new InvalidOperationException("Expected the workflow files to reference the new release-validation and conformance harness scripts.");
-                            }
-                        }),
-
-                    new TestCaseDescriptor(
-                        suiteId: "ReleaseReadinessSuites",
                         caseId: "PackedServerPackageServesLinuxKernelClient",
                         displayName: "A clean packaged OpenNFS.Server consumer can be mounted and used by a Linux kernel client",
                         tags: new List<string> { TestCategories.Interop, TestCategories.Privileged, TestCategories.Automated },

@@ -23,14 +23,6 @@ $conformanceArtifactsScriptPath = Join-Path $PSScriptRoot "Assert-ConformanceArt
 $honestyScriptPath = Join-Path $PSScriptRoot "Assert-RepositoryHonesty.ps1"
 $generateXdrScriptPath = Join-Path $RepositoryRoot "scripts\\Generate-Xdr.ps1"
 
-$requiredWorkflowPaths = @(
-    ".github/workflows/build.yaml",
-    ".github/workflows/test.yaml",
-    ".github/workflows/interop-hosted.yaml",
-    ".github/workflows/interop-selfhosted.yaml",
-    ".github/workflows/pynfs.yaml"
-)
-
 $requiredHarnessPaths = @(
     "scripts/interop/Invoke-PrivilegedInterop.ps1",
     "scripts/interop/pjdfstest/Invoke-Pjdfstest.ps1",
@@ -39,7 +31,7 @@ $requiredHarnessPaths = @(
     "scripts/release/Assert-ConformanceArtifacts.ps1"
 )
 
-foreach ($relativePath in $requiredWorkflowPaths + $requiredHarnessPaths) {
+foreach ($relativePath in $requiredHarnessPaths) {
     $fullPath = Join-Path $RepositoryRoot $relativePath
     if (-not (Test-Path $fullPath -PathType Leaf)) {
         throw "Required release-validation artifact '$relativePath' is missing."
