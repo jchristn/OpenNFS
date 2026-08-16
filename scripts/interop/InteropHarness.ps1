@@ -13,7 +13,7 @@ function Resolve-InteropRepositoryRoot {
     $directory = [System.IO.DirectoryInfo]::new((Resolve-Path $ScriptRoot).Path)
     while ($null -ne $directory) {
         if ((Test-Path (Join-Path $directory.FullName "README.md") -PathType Leaf) `
-            -and (Test-Path (Join-Path $directory.FullName "src" "OpenNFS.sln") -PathType Leaf)) {
+            -and (Test-Path (Join-Path (Join-Path $directory.FullName "src") "OpenNFS.sln") -PathType Leaf)) {
             return $directory.FullName
         }
 
