@@ -548,7 +548,7 @@ namespace OpenNFS.Client.Apis
             CancellationToken cancellationToken)
         {
             return _client.ExecuteV3ProcedureAsync(
-                CreateFileRequest(directoryHandle, entryName, failIfExists),
+                CreateFileRequest(directoryHandle, entryName, failIfExists, _client.Settings.DefaultFileCreateMode),
                 "NFSv3 CREATE",
                 OpenNfsTransportPipelineIdempotency.NonIdempotent,
                 ReadCreateFileV3Result,
@@ -569,7 +569,7 @@ namespace OpenNFS.Client.Apis
             bool failIfExists,
             CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateFileRequest(directoryHandle, entryName, failIfExists), cancellationToken);
+            return _client.PrepareV3ProcedureAsync(CreateFileRequest(directoryHandle, entryName, failIfExists, _client.Settings.DefaultFileCreateMode), cancellationToken);
         }
 
         /// <summary>
@@ -595,7 +595,7 @@ namespace OpenNFS.Client.Apis
             CancellationToken cancellationToken)
         {
             return _client.ExecuteV3ProcedureAsync(
-                CreateDirectoryRequest(directoryHandle, entryName),
+                CreateDirectoryRequest(directoryHandle, entryName, _client.Settings.DefaultDirectoryCreateMode),
                 "NFSv3 MKDIR",
                 OpenNfsTransportPipelineIdempotency.NonIdempotent,
                 ReadCreateDirectoryV3Result,
@@ -614,7 +614,7 @@ namespace OpenNFS.Client.Apis
             string entryName,
             CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateDirectoryRequest(directoryHandle, entryName), cancellationToken);
+            return _client.PrepareV3ProcedureAsync(CreateDirectoryRequest(directoryHandle, entryName, _client.Settings.DefaultDirectoryCreateMode), cancellationToken);
         }
 
         /// <summary>
@@ -1274,7 +1274,7 @@ namespace OpenNFS.Client.Apis
                 procedurePayload: writer.ToArray());
         }
 
-        private static OpenNfsV3ProcedureRequest CreateFileRequest(byte[] directoryHandle, string entryName, bool failIfExists)
+        private static OpenNfsV3ProcedureRequest CreateFileRequest(byte[] directoryHandle, string entryName, bool failIfExists, uint mode)
         {
             CREATE3args arguments = new CREATE3args
             {
@@ -1282,19 +1282,19 @@ namespace OpenNFS.Client.Apis
                 how = new createhow3
                 {
                     mode = failIfExists ? createmode3.GUARDED : createmode3.UNCHECKED,
-                    obj_attributes = CreateUnsetAttributes(),
+                    obj_attributes = CreateModeAttributes(mode),
                 },
             };
 
             return CreateEncodedRequest(OpenNfsV3RpcConstants.NfsCreateProcedure, arguments.WriteTo);
         }
 
-        private static OpenNfsV3ProcedureRequest CreateDirectoryRequest(byte[] directoryHandle, string entryName)
+        private static OpenNfsV3ProcedureRequest CreateDirectoryRequest(byte[] directoryHandle, string entryName, uint mode)
         {
             MKDIR3args arguments = new MKDIR3args
             {
                 where = CreateDirectoryOperationArguments(directoryHandle, entryName),
-                attributes = CreateUnsetAttributes(),
+                attributes = CreateModeAttributes(mode),
             };
 
             return CreateEncodedRequest(OpenNfsV3RpcConstants.NfsMkdirProcedure, arguments.WriteTo);
@@ -1406,6 +1406,23 @@ namespace OpenNFS.Client.Apis
             {
                 data = safeFileHandle,
             };
+        }
+
+        private static sattr3 CreateModeAttributes(uint mode)
+        {
+            sattr3 attributes = CreateUnsetAttributes();
+            attributes.mode = new set_mode3
+            {
+                set_it = true,
+                mode = new mode3
+                {
+                    Value = new uint32
+                    {
+                        Value = mode & 4095U,
+                    },
+                },
+            };
+            return attributes;
         }
 
         private static sattr3 CreateUnsetAttributes()

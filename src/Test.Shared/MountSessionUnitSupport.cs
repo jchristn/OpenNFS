@@ -201,6 +201,18 @@ namespace Test.Shared
             return Task.CompletedTask;
         }
 
+        internal static Task ExecuteAlignedReadCountAsync(CancellationToken cancellationToken)
+        {
+            _ = cancellationToken;
+            const int Chunk = 1048576;
+            Require(OpenNfsMountSessionReadSupport.AlignedReadCount(0, 5_000_000, Chunk) == Chunk, "Expected aligned offsets to use the full chunk.");
+            Require(OpenNfsMountSessionReadSupport.AlignedReadCount((2 * 1048576) + 5, 1048574, Chunk) == Chunk - 5, "Expected the knfsd-failing READ(2 MiB + 5, 1 MiB - 2) to be shortened to end on a page boundary.");
+            Require(OpenNfsMountSessionReadSupport.AlignedReadCount(4096 + 100, 10, Chunk) == 10, "Expected short unaligned reads to be left unchanged.");
+            Require(OpenNfsMountSessionReadSupport.AlignedReadCount(5, 100_000, 1000) == 1000, "Expected sub-page chunk sizes not to be realigned.");
+            Require((4095 + OpenNfsMountSessionReadSupport.AlignedReadCount(4095, Chunk * 2, Chunk)) % 4096 == 0, "Expected an unaligned full-chunk read to end on a page boundary.");
+            return Task.CompletedTask;
+        }
+
         internal static Task ExecuteLocalFileSystemAdvertisesAttributeMutationAsync(CancellationToken cancellationToken)
         {
             _ = cancellationToken;
@@ -285,6 +297,11 @@ namespace Test.Shared
             Require(new OpenNfsClientSettings("nfs.example").HasExplicitServerPort, "Expected directly constructed settings to treat the port as explicit.");
             Require(!new OpenNfsClientBuilder().WithPortmapperDiscovery().WithPortmapperDiscovery(false).BuildSettings().EnablePortmapperDiscovery, "Expected WithPortmapperDiscovery(false) to disable discovery.");
 
+            OpenNfsClientSettings modeDefaults = new OpenNfsClientBuilder().BuildSettings();
+            Require(modeDefaults.DefaultFileCreateMode == 420U && modeDefaults.DefaultDirectoryCreateMode == 493U, "Expected default create modes of 0644 and 0755.");
+            OpenNfsClientSettings customModes = new OpenNfsClientBuilder().WithDefaultCreateModes(384U, 448U).BuildSettings();
+            Require(customModes.DefaultFileCreateMode == 384U && customModes.DefaultDirectoryCreateMode == 448U, "Expected WithDefaultCreateModes to be captured.");
+            RequireThrows<ArgumentOutOfRangeException>(() => new OpenNfsClientBuilder().WithDefaultCreateModes(4096U, 493U));
             RequireThrows<ArgumentOutOfRangeException>(() => new OpenNfsClientBuilder().WithPortmapperPort(0));
             RequireThrows<ArgumentOutOfRangeException>(() => new OpenNfsClientBuilder().WithPortmapperPort(65536));
             return Task.CompletedTask;

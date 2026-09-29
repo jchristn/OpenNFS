@@ -319,10 +319,11 @@ await session.Metadata.SetTimesAsync("/blobs/2026/09/b.bin", accessTimeUtc: null
 Write semantics shared by `WriteAllBytesAsync` and `WriteAsync`:
 
 - A missing file is created with `CREATE` (UNCHECKED); the parent directory must already exist (`NoEntry` otherwise), and a directory target fails with `IsDirectory`.
+- Every `CREATE` and `MKDIR` carries an explicit mode: `0644` for files and `0755` for directories by default, configurable with `WithDefaultCreateModes(fileMode, directoryMode)` (pass modes with your umask applied). Without it some servers (Linux knfsd) create mode-`000` entries that a non-root AUTH_SYS user cannot use.
 - After the data is written, a longer existing file is truncated with `SETATTR`, so the result is exactly the payload; an empty payload produces an empty file.
 - NFSv3 short writes are continued from `offset + count`; a zero-byte acknowledgement is a protocol error.
 - When any `WRITE` reply is weaker than `FILE_SYNC`, the client sends `COMMIT` and checks the write verifier. If the verifier changed (for example after a server restart), the data is rewritten once with `FILE_SYNC` (RFC 1813 section 3.3.21). Non-seekable `WriteAsync` sources cannot be replayed, so that case throws `OpenNfsClientIoException`, as does a verifier that keeps changing.
-- Transfers are chunked by the server's `FSINFO` preferred sizes (bounded by the advertised maximums), fetched once per mounted session, with a 64 KiB fallback.
+- Transfers are chunked by the server's `FSINFO` preferred sizes (bounded by the advertised maximums), fetched once per mounted session, with a 64 KiB fallback. Reads that start at an unaligned offset are shortened to end on a 4 KiB page boundary, the same request shape as the Linux client (Linux knfsd drops the connection for some unaligned full-size READs).
 
 For lower-level control, `client.Files.SetAttributesV3Async(...)` issues NFSv3 `SETATTR` directly with an `OpenNfsV3SetAttributes` change set (mode, uid, gid, size, and access/modify time as don't-change, server time, or client time) and an optional ctime guard that yields `OpenNfsV3Status.NotSynchronized` on mismatch. `TrySetAttributesV3Async(...)` and `PrepareSetAttributesV3Async(...)` follow the usual non-throwing and planning conventions. `OpenNfsV3Time.ToDateTimeUtc()` and `OpenNfsV3Time.FromDateTimeUtc(...)` convert NFSv3 timestamps.
 

@@ -315,6 +315,35 @@ namespace Test.Shared
             Require(readCounts.Count >= 40 && readCounts.Max() <= 1024, "Expected READ counts to be bounded by the advertised rtmax of 1024 bytes (max observed " + readCounts.Max() + ").");
         }
 
+        internal static async Task ExecuteUnalignedReadsStayWithinTransferPagesAsync(CancellationToken cancellationToken)
+        {
+            await using EphemeralOpenNfsServer server = await EphemeralOpenNfsServer.StartAsync(cancellationToken).ConfigureAwait(false);
+            InterceptingRpcExecutor executor = new InterceptingRpcExecutor();
+            await using OpenNfsClient client = await ConnectInterceptedAsync(server, executor, cancellationToken).ConfigureAwait(false);
+            await using OpenNfsMountSession session = await client.MountAsync(EphemeralOpenNfsServer.ExportPath, cancellationToken).ConfigureAwait(false);
+
+            MountSessionScenarioTarget target = new MountSessionScenarioTarget("in-process OpenNFS server (READ shape)", client, session, modeRoundTripsExactly: false);
+            await MountSessionScenarioSupport.StreamReadSequenceAsync(target, "/", cancellationToken).ConfigureAwait(false);
+            byte[] payload = CreatePayload(3_000_000, seed: 22);
+            await session.Files.WriteAllBytesAsync("/unaligned.bin", payload, OpenNfsWriteStability.FileSync, cancellationToken).ConfigureAwait(false);
+            byte[] ranged = await session.Files.ReadAsync("/unaligned.bin", 12_345, 2_500_000, cancellationToken).ConfigureAwait(false);
+            Require(ranged.AsSpan().SequenceEqual(payload.AsSpan(12_345, 2_500_000)), "Expected an unaligned multi-chunk ranged read to return the exact range.");
+
+            const int TransferSize = 64 * 1024;
+            int maximumPages = TransferSize / 4096;
+            foreach (InterceptedNfsCall call in executor.CallsFor(ReadProcedure))
+            {
+                READ3args arguments = Decode(call.Payload, READ3args.ReadFrom);
+                ulong offset = arguments.offset?.Value?.Value ?? 0UL;
+                uint count = arguments.count?.Value?.Value ?? 0U;
+                ulong firstPage = offset / 4096;
+                ulong lastPage = (offset + count - 1) / 4096;
+                Require(
+                    count <= TransferSize && (int)(lastPage - firstPage + 1) <= maximumPages,
+                    "Expected every READ to span at most " + maximumPages + " pages, but READ(offset " + offset + ", count " + count + ") spans " + (lastPage - firstPage + 1) + ".");
+            }
+        }
+
         internal static async Task ExecuteTransferSizesFallBackWhenFsInfoFailsAsync(CancellationToken cancellationToken)
         {
             await using EphemeralOpenNfsServer server = await EphemeralOpenNfsServer.StartAsync(cancellationToken).ConfigureAwait(false);

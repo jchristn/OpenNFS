@@ -34,6 +34,7 @@ namespace OpenNFS.Client.Internal
         private readonly ConcurrentDictionary<uint, TaskCompletionSource<RpcMessageEnvelope>> _pending =
             new ConcurrentDictionary<uint, TaskCompletionSource<RpcMessageEnvelope>>();
         private readonly NetworkStream _stream;
+        private readonly object _stateLock = new object();
         private readonly SemaphoreSlim _writeGate = new SemaphoreSlim(1, 1);
         private long _lastActivityTicks;
         private long _lastReceiveTicks;
@@ -110,24 +111,23 @@ namespace OpenNFS.Client.Internal
             ArgumentNullException.ThrowIfNull(callEnvelope);
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!IsUsable || PeerHasClosed())
-            {
-                Retire();
-                throw new OpenNfsConnectionUnavailableException("The pooled RPC connection to " + DescribeEndpoint() + " is no longer usable.");
-            }
-
             uint xid = callEnvelope.Header.xid;
             TaskCompletionSource<RpcMessageEnvelope> completion =
                 new TaskCompletionSource<RpcMessageEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (!_pending.TryAdd(xid, completion))
-            {
-                throw new IOException("An RPC with xid " + xid + " is already outstanding on the connection to " + DescribeEndpoint() + ".");
-            }
 
-            if (IsClosed)
+            // Registration and the open-state check are atomic with retirement (CloseIfRetiredAndIdle) so a retiring
+            // connection can never close underneath a call that was just admitted.
+            lock (_stateLock)
             {
-                _pending.TryRemove(xid, out _);
-                throw new OpenNfsConnectionUnavailableException("The pooled RPC connection to " + DescribeEndpoint() + " closed before the call was sent.");
+                if (Volatile.Read(ref _state) != StateOpen)
+                {
+                    throw new OpenNfsConnectionUnavailableException("The pooled RPC connection to " + DescribeEndpoint() + " is no longer accepting calls.");
+                }
+
+                if (!_pending.TryAdd(xid, completion))
+                {
+                    throw new IOException("An RPC with xid " + xid + " is already outstanding on the connection to " + DescribeEndpoint() + ".");
+                }
             }
 
             byte[] framedCall = RecordMarkingCodec.EncodeMessage(RpcMessageCodec.Encode(callEnvelope), 32768);
@@ -188,7 +188,11 @@ namespace OpenNFS.Client.Internal
 
         internal void Retire()
         {
-            Interlocked.CompareExchange(ref _state, StateRetiring, StateOpen);
+            lock (_stateLock)
+            {
+                Interlocked.CompareExchange(ref _state, StateRetiring, StateOpen);
+            }
+
             CloseIfRetiredAndIdle();
         }
 
@@ -199,10 +203,15 @@ namespace OpenNFS.Client.Internal
 
         private void CloseIfRetiredAndIdle()
         {
-            if (Volatile.Read(ref _state) == StateRetiring && _pending.IsEmpty)
+            lock (_stateLock)
             {
-                Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was retired."));
+                if (Volatile.Read(ref _state) != StateRetiring || !_pending.IsEmpty)
+                {
+                    return;
+                }
             }
+
+            Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was retired."));
         }
 
         private void Fail(Exception exception)
@@ -298,19 +307,6 @@ namespace OpenNFS.Client.Internal
             catch (Exception exception)
             {
                 Fail(exception);
-            }
-        }
-
-        private bool PeerHasClosed()
-        {
-            try
-            {
-                Socket socket = _client.Client;
-                return socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0 && _pending.IsEmpty;
-            }
-            catch (Exception)
-            {
-                return true;
             }
         }
 

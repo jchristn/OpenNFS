@@ -291,6 +291,35 @@ namespace OpenNFS.Client
         /// </summary>
         public TimeSpan IdleConnectionTimeout { get; private set; } = TimeSpan.FromSeconds(30);
 
+        /// <summary>
+        /// Gets the permission mode sent with NFSv3 <c>CREATE</c> for new regular files (the RFC 1813 <c>sattr3.mode</c>).
+        /// Default value: <c>0644</c> octal (420 decimal).
+        /// </summary>
+        public uint DefaultFileCreateMode { get; private set; } = 420U;
+
+        /// <summary>
+        /// Gets the permission mode sent with NFSv3 <c>MKDIR</c> for new directories (the RFC 1813 <c>sattr3.mode</c>).
+        /// Default value: <c>0755</c> octal (493 decimal).
+        /// </summary>
+        public uint DefaultDirectoryCreateMode { get; private set; } = 493U;
+
+        internal OpenNfsClientSettings ApplyCreateModeOptions(uint fileMode, uint directoryMode)
+        {
+            if (fileMode > 4095U)
+            {
+                throw new ArgumentOutOfRangeException(nameof(fileMode), fileMode, "The file create mode must be between 0 and 07777 octal.");
+            }
+
+            if (directoryMode > 4095U)
+            {
+                throw new ArgumentOutOfRangeException(nameof(directoryMode), directoryMode, "The directory create mode must be between 0 and 07777 octal.");
+            }
+
+            DefaultFileCreateMode = fileMode;
+            DefaultDirectoryCreateMode = directoryMode;
+            return this;
+        }
+
         internal OpenNfsClientSettings ApplyConnectionPoolOptions(int maxConnectionsPerEndpoint, TimeSpan idleConnectionTimeout)
         {
             if (maxConnectionsPerEndpoint < 1 || maxConnectionsPerEndpoint > 64)

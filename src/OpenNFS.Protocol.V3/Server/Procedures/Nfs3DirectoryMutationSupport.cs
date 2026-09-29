@@ -83,6 +83,49 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             };
         }
 
+        /// <summary>
+        /// Applies the mode requested in a <c>CREATE</c> or <c>MKDIR</c> <c>sattr3</c> to a newly created entry through the
+        /// host's attribute-mutation capability. This is best effort: hosts without the capability, or that cannot represent
+        /// the mode, keep their default permissions and the create still succeeds.
+        /// </summary>
+        /// <returns>The refreshed path information when the mode was applied; otherwise <paramref name="createdPathInfo"/>.</returns>
+        internal static async Task<NfsPathInfo> ApplyRequestedCreateModeAsync(
+            OpenNfsServer server,
+            NfsPathInfo createdPathInfo,
+            sattr3? requestedAttributes,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(server);
+            ArgumentNullException.ThrowIfNull(createdPathInfo);
+
+            if (requestedAttributes?.mode?.set_it != true
+                || server.Capabilities.AttributeMutation is null
+                || !createdPathInfo.Exists)
+            {
+                return createdPathInfo;
+            }
+
+            uint mode = (requestedAttributes.mode.mode?.Value?.Value ?? 0U) & 0xFFFU;
+            try
+            {
+                NfsSetAttributesResponse response = await server.Capabilities.AttributeMutation.SetAttributesAsync(
+                    new NfsSetAttributesRequest(
+                        createdPathInfo.Path,
+                        createdPathInfo.Kind,
+                        mode: mode,
+                        cancellationToken: cancellationToken)).ConfigureAwait(false);
+                return response?.PathInfo ?? createdPathInfo;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return createdPathInfo;
+            }
+        }
+
         internal static nfsstat3 MapCreateException(Exception exception, bool failIfExists)
         {
             ArgumentNullException.ThrowIfNull(exception);

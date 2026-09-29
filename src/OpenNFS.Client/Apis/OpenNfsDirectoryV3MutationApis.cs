@@ -24,7 +24,7 @@ namespace OpenNFS.Client.Apis
             CancellationToken cancellationToken)
         {
             return _client.ExecuteV3ProcedureAsync(
-                CreateFileRequest(directoryHandle, entryName, failIfExists),
+                CreateFileRequest(directoryHandle, entryName, failIfExists, _client.Settings.DefaultFileCreateMode),
                 "NFSv3 CREATE",
                 OpenNfsTransportPipelineIdempotency.NonIdempotent,
                 ReadCreateFileV3Result,
@@ -37,7 +37,7 @@ namespace OpenNFS.Client.Apis
             bool failIfExists,
             CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateFileRequest(directoryHandle, entryName, failIfExists), cancellationToken);
+            return _client.PrepareV3ProcedureAsync(CreateFileRequest(directoryHandle, entryName, failIfExists, _client.Settings.DefaultFileCreateMode), cancellationToken);
         }
 
         public OpenNfsV3CreatePathResult ReadCreateFileV3Result(ReadOnlyMemory<byte> encodedReply)
@@ -51,7 +51,7 @@ namespace OpenNFS.Client.Apis
             CancellationToken cancellationToken)
         {
             return _client.ExecuteV3ProcedureAsync(
-                CreateDirectoryRequest(directoryHandle, entryName),
+                CreateDirectoryRequest(directoryHandle, entryName, _client.Settings.DefaultDirectoryCreateMode),
                 "NFSv3 MKDIR",
                 OpenNfsTransportPipelineIdempotency.NonIdempotent,
                 ReadCreateDirectoryV3Result,
@@ -63,7 +63,7 @@ namespace OpenNFS.Client.Apis
             string entryName,
             CancellationToken cancellationToken)
         {
-            return _client.PrepareV3ProcedureAsync(CreateDirectoryRequest(directoryHandle, entryName), cancellationToken);
+            return _client.PrepareV3ProcedureAsync(CreateDirectoryRequest(directoryHandle, entryName, _client.Settings.DefaultDirectoryCreateMode), cancellationToken);
         }
 
         public OpenNfsV3CreatePathResult ReadCreateDirectoryV3Result(ReadOnlyMemory<byte> encodedReply)

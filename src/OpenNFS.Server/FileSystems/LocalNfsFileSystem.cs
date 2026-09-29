@@ -447,8 +447,8 @@ namespace OpenNFS.Server.FileSystems
         /// <summary>
         /// Applies size, timestamp, and mode changes to a host-local path.
         /// On Unix-like hosts the mode is applied with <see cref="File.SetUnixFileMode(string, UnixFileMode)"/>.
-        /// On Windows only the owner-write bit of a file's mode is persisted, as the read-only attribute; mode changes on
-        /// Windows directories are not supported. Numeric owner and group changes are not supported by the built-in local
+        /// On Windows only the owner-write bit of a file's mode is persisted, as the read-only attribute; Windows directories
+        /// accept modes that keep the owner write bit (a no-op) and reject modes that remove it. Numeric owner and group changes are not supported by the built-in local
         /// file system unless they match the reported owner (<c>0</c>).
         /// </summary>
         /// <param name="request">Request context for the attribute update.</param>
@@ -624,7 +624,13 @@ namespace OpenNFS.Server.FileSystems
 
             if (pathKind != NfsPathKind.File)
             {
-                throw new NotSupportedException("Changing the mode of a directory or symbolic link is not supported on Windows hosts.");
+                if ((mode & OwnerWriteBit) != 0)
+                {
+                    // Windows directories are always owner-writable; a mode that keeps the owner write bit is representable.
+                    return;
+                }
+
+                throw new NotSupportedException("Removing owner write permission from a directory or symbolic link is not supported on Windows hosts.");
             }
 
             FileAttributes attributes = File.GetAttributes(sourcePath);

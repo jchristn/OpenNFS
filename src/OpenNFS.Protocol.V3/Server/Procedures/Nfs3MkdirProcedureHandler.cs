@@ -113,6 +113,12 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                         parentAfterFailure));
             }
 
+            NfsPathInfo createdPathInfo = await Nfs3DirectoryMutationSupport.ApplyRequestedCreateModeAsync(
+                _server,
+                createResponse.PathInfo,
+                arguments.attributes,
+                cancellationToken).ConfigureAwait(false);
+
             NfsPathInfo parentAfterCreate =
                 await Nfs3DirectoryMutationSupport.GetPathInfoAsync(
                     _server,
@@ -121,7 +127,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 
             NfsFileHandleTarget createdTarget = new NfsFileHandleTarget(
                 directoryResolution.Target.ExportPath,
-                createResponse.PathInfo.Path);
+                createdPathInfo.Path);
 
             return new MKDIR3res
             {
@@ -132,7 +138,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                         _server,
                         createdTarget,
                         cancellationToken).ConfigureAwait(false),
-                    obj_attributes = Nfs3DirectoryMutationSupport.CreatePostOperationAttributes(createdTarget, createResponse.PathInfo),
+                    obj_attributes = Nfs3DirectoryMutationSupport.CreatePostOperationAttributes(createdTarget, createdPathInfo),
                     dir_wcc = Nfs3MetadataResolver.CreateWeakCacheConsistencyData(
                         directoryResolution.Target,
                         directoryResolution.PathInfo,

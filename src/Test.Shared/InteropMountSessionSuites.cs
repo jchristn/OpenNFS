@@ -36,6 +36,9 @@ namespace Test.Shared
                 {
                     Interop(probe, "MountSessionScenariosAgainstLinuxKnfsd", "The mounted-session scenario matrix (including 1,500-entry READDIRPLUS paging and 32-way concurrency) passes against a Linux knfsd container", cancellationToken => ExecuteScenariosAgainstPeerAsync(DockerNfsV3PeerKind.LinuxKnfsd, cancellationToken)),
                     Interop(probe, "MountSessionScenariosAgainstGanesha", "The mounted-session scenario matrix (including 1,500-entry READDIRPLUS paging and 32-way concurrency) passes against an NFS-Ganesha container", cancellationToken => ExecuteScenariosAgainstPeerAsync(DockerNfsV3PeerKind.Ganesha, cancellationToken)),
+                    Interop(probe, "CreateModesAndOwnershipAgainstLinuxKnfsd", "CREATE and MKDIR send 0644/0755 (or configured) modes so a non-root AUTH_SYS user can use what it creates on Linux knfsd, and other users are denied", cancellationToken => ExecutePermissionsAgainstPeerAsync(DockerNfsV3PeerKind.LinuxKnfsd, cancellationToken)),
+                    Interop(probe, "CreateModesAndOwnershipAgainstGanesha", "CREATE and MKDIR send 0644/0755 (or configured) modes so a non-root AUTH_SYS user can use what it creates on NFS-Ganesha, and other users are denied", cancellationToken => ExecutePermissionsAgainstPeerAsync(DockerNfsV3PeerKind.Ganesha, cancellationToken)),
+                    Interop(probe, "CreateModesAndOwnershipAgainstUnfs3", "CREATE and MKDIR send 0644/0755 (or configured) modes so a non-root AUTH_SYS user can use what it creates on unfs3, and other users are denied", cancellationToken => ExecutePermissionsAgainstPeerAsync(DockerNfsV3PeerKind.Unfs3, cancellationToken)),
                     Interop(probe, "PortmapperDiscoveryFindsLinuxKnfsdMountd", "Portmapper discovery finds rpc.mountd through a real rpcbind when no mount endpoint is configured", ExecutePortmapperAgainstKnfsdAsync),
                     Interop(probe, "LinuxKernelClientTruncatesThroughSampleServer", "The Linux kernel NFSv3 client truncates (O_TRUNC and truncate), sets times, and chmods files through the sample server", ExecuteLinuxClientSetAttrAgainstSampleServerAsync),
                     Interop(probe, "LinuxKernelClientTruncatesThroughSampleServerOverNfs40", "The Linux kernel NFSv4.0 client truncates (O_TRUNC and truncate) and sets times through the sample server", ExecuteLinuxClientV40SetAttrAgainstSampleServerAsync),
@@ -80,6 +83,20 @@ namespace Test.Shared
                     string serverContent = await peer.ExecAsync(new[] { "cat", serverPath }, cancellationToken).ConfigureAwait(false);
                     Require(serverContent == "abc", "Expected the peer's own file system to hold exactly 'abc' after an overwrite, but found '" + serverContent + "'.");
                 }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                string logs = await peer.GetLogsAsync(CancellationToken.None).ConfigureAwait(false);
+                throw new InvalidOperationException(exception.Message + Environment.NewLine + peer.DisplayName + " logs:" + Environment.NewLine + logs, exception);
+            }
+        }
+
+        private static async Task ExecutePermissionsAgainstPeerAsync(DockerNfsV3PeerKind kind, CancellationToken cancellationToken)
+        {
+            await using DockerNfsV3PeerContainer peer = await DockerNfsV3PeerContainer.StartAsync(kind, publishPortmapper: false, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await MountSessionPermissionSupport.RunPeerPermissionScenarioAsync(peer, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {

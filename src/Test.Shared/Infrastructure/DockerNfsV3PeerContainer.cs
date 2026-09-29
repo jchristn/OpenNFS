@@ -22,6 +22,11 @@ namespace Test.Shared.Infrastructure
         /// The NFS-Ganesha userspace server configured for NFSv3 and NFSv4.
         /// </summary>
         Ganesha,
+
+        /// <summary>
+        /// The unfs3 userspace NFSv3 server serving a tmpfs export (so Unix modes and ownership are real).
+        /// </summary>
+        Unfs3,
     }
 
     /// <summary>
@@ -57,7 +62,17 @@ namespace Test.Shared.Infrastructure
         /// </summary>
         internal int PortmapperPort { get; }
 
-        internal string DisplayName => Kind == DockerNfsV3PeerKind.LinuxKnfsd ? "Linux knfsd" : "NFS-Ganesha";
+        internal string DisplayName => Kind switch
+        {
+            DockerNfsV3PeerKind.LinuxKnfsd => "Linux knfsd",
+            DockerNfsV3PeerKind.Ganesha => "NFS-Ganesha",
+            _ => "unfs3",
+        };
+
+        /// <summary>
+        /// Gets the in-container directory that backs the <c>/export</c> NFS export.
+        /// </summary>
+        internal string ContainerExportRoot => Kind == DockerNfsV3PeerKind.Ganesha ? "/export-real" : "/export";
 
         /// <summary>
         /// Starts the peer. When <paramref name="publishPortmapper"/> is true, the portmapper is published and rpc.mountd
@@ -78,7 +93,7 @@ namespace Test.Shared.Infrastructure
             Exception? lastException = null;
             for (int attempt = 0; attempt < 2; attempt++)
             {
-                string containerName = "opennfs-v3-peer-" + (kind == DockerNfsV3PeerKind.LinuxKnfsd ? "knfsd-" : "ganesha-") + Guid.NewGuid().ToString("N");
+                string containerName = "opennfs-v3-peer-" + kind.ToString().ToLowerInvariant() + "-" + Guid.NewGuid().ToString("N");
                 int fixedMountPort = publishPortmapper ? GetUnusedPort() : 0;
 
                 try
@@ -114,6 +129,12 @@ namespace Test.Shared.Infrastructure
                         arguments.Add("--tmpfs");
                         arguments.Add("/export:rw,mode=0777,size=256m");
                         arguments.Add(DockerInteropImages.LinuxKnfsdServerImage);
+                    }
+                    else if (kind == DockerNfsV3PeerKind.Unfs3)
+                    {
+                        arguments.Add("--tmpfs");
+                        arguments.Add("/export:rw,mode=0777,size=64m");
+                        arguments.Add(DockerInteropImages.LinuxNfsServerImage);
                     }
                     else
                     {

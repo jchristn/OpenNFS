@@ -22,6 +22,8 @@ namespace OpenNFS.Client
         private string _ServerHost = "localhost";
         private int _PortmapperPort = 111;
         private int _MaxConnectionsPerEndpoint = 4;
+        private uint _DefaultFileCreateMode = 420U;
+        private uint _DefaultDirectoryCreateMode = 493U;
         private TimeSpan _IdleConnectionTimeout = TimeSpan.FromSeconds(30);
         private bool _EnablePortmapperDiscovery;
         private int _ServerPort = 2049;
@@ -151,6 +153,33 @@ namespace OpenNFS.Client
             }
 
             _MountServerPort = mountServerPort;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the permission modes sent when the client creates files (NFSv3 <c>CREATE</c>) and directories (NFSv3 <c>MKDIR</c>),
+        /// including the mounted-session create paths (<c>CreateFileAsync</c>, <c>CreateDirectoryAsync</c> with or without parents,
+        /// and the create-if-missing path of <c>WriteAllBytesAsync</c>/<c>WriteAsync</c>). Pass values that already have your umask
+        /// applied. Default values: <c>0644</c> octal (420) for files and <c>0755</c> octal (493) for directories.
+        /// </summary>
+        /// <param name="fileMode">Permission bits for new files, between 0 and 07777 octal.</param>
+        /// <param name="directoryMode">Permission bits for new directories, between 0 and 07777 octal.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when a mode is above 07777 octal.</exception>
+        public OpenNfsClientBuilder WithDefaultCreateModes(uint fileMode, uint directoryMode)
+        {
+            if (fileMode > 4095U)
+            {
+                throw new ArgumentOutOfRangeException(nameof(fileMode), fileMode, "The file create mode must be between 0 and 07777 octal.");
+            }
+
+            if (directoryMode > 4095U)
+            {
+                throw new ArgumentOutOfRangeException(nameof(directoryMode), directoryMode, "The directory create mode must be between 0 and 07777 octal.");
+            }
+
+            _DefaultFileCreateMode = fileMode;
+            _DefaultDirectoryCreateMode = directoryMode;
             return this;
         }
 
@@ -456,7 +485,8 @@ namespace OpenNFS.Client
                 identityPolicy: _IdentityPolicy,
                 rpcSecGssOptions: _RpcSecGssOptions)
                 .ApplyPortmapperOptions(_EnablePortmapperDiscovery, _PortmapperPort, _ServerPortExplicit)
-                .ApplyConnectionPoolOptions(_MaxConnectionsPerEndpoint, _IdleConnectionTimeout);
+                .ApplyConnectionPoolOptions(_MaxConnectionsPerEndpoint, _IdleConnectionTimeout)
+                .ApplyCreateModeOptions(_DefaultFileCreateMode, _DefaultDirectoryCreateMode);
         }
 
         /// <summary>

@@ -221,7 +221,10 @@ namespace OpenNFS.Client.Internal
                 || _position < _bufferOffset
                 || _position >= _bufferOffset + _bufferCount)
             {
-                int fetchCount = (int)Math.Min(_chunkSize, _length - _position);
+                int fetchCount = (int)OpenNfsMountSessionReadSupport.AlignedReadCount(
+                    (ulong)_position,
+                    (int)Math.Min(_chunkSize, _length - _position),
+                    _chunkSize);
                 byte[] chunk = new byte[fetchCount];
                 int fetched = await OpenNfsMountSessionReadSupport.ReadRangeAsync(
                     _session,

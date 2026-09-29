@@ -7,7 +7,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Title>OpenNFS.Server</Title>
     <PackageTags>nfs;nfsv3;nfsv4;server;onc-rpc;mount;storage</PackageTags>
-    <PackageReleaseNotes>v0.1.1: fixes WriteAllBytesAsync truncation, create-if-missing, short writes, COMMIT/verifier handling, and FSINFO-sized transfers; adds NFSv3 SETATTR (client API and server INfsAttributeMutation capability), ranged/stream reads, stream writes, rename, READDIRPLUS listings, mkdir -p, exists/set-length/set-times, opt-in portmapper discovery, persistent multiplexed TCP connections (no connection per RPC), and verbatim path components. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v0.1.1: fixes WriteAllBytesAsync truncation, create-if-missing, short writes, COMMIT/verifier handling, and FSINFO-sized transfers; adds NFSv3 SETATTR (client API and server INfsAttributeMutation capability), ranged/stream reads, stream writes, rename, READDIRPLUS listings, mkdir -p, exists/set-length/set-times, opt-in portmapper discovery, persistent multiplexed TCP connections (no connection per RPC), verbatim path components, explicit CREATE/MKDIR modes, and page-aligned READ chunking for knfsd. See CHANGELOG.md.</PackageReleaseNotes>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

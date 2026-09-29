@@ -57,6 +57,7 @@ namespace Test.Shared
             await RunStepAsync(target, "write-all-bytes-negative", () => WriteAllBytesNegativeAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
             await RunStepAsync(target, "large-round-trip-and-ranged-reads", () => LargeRoundTripAndRangedReadsAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
             await RunStepAsync(target, "open-read-stream", () => OpenReadStreamAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
+            await RunStepAsync(target, "stream-read-sequence", () => StreamReadSequenceAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
             await RunStepAsync(target, "write-from-stream", () => WriteFromStreamAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
             await RunStepAsync(target, "rename", () => RenameAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
             await RunStepAsync(target, "exists", () => ExistsAsync(target, basePath, cancellationToken)).ConfigureAwait(false);
@@ -425,6 +426,68 @@ namespace Test.Shared
 
             await ExpectStatusAsync(() => session.Files.OpenReadAsync(basePath + "/a/missing.bin", cancellationToken), OpenNfsV3Status.NoEntry).ConfigureAwait(false);
             await ExpectStatusAsync(() => session.Files.OpenReadAsync(basePath + "/a/b", cancellationToken), OpenNfsV3Status.IsDirectory).ConfigureAwait(false);
+        }
+
+        internal static async Task StreamReadSequenceAsync(MountSessionScenarioTarget target, string basePath, CancellationToken cancellationToken)
+        {
+            OpenNfsMountSession session = target.Session;
+            string path = basePath + "/stream-sequence.bin";
+            byte[] payload = CreatePayload((3 * 1024 * 1024) + 3, seed: 21);
+            using (MemoryStream source = new MemoryStream(payload))
+            {
+                await session.Files.WriteAsync(path, source, null, OpenNfsWriteStability.Unstable, cancellationToken).ConfigureAwait(false);
+            }
+
+            Stream stream = await session.Files.OpenReadAsync(path, cancellationToken).ConfigureAwait(false);
+            await using (stream.ConfigureAwait(false))
+            {
+                Require(stream.CanSeek && stream.Length == payload.Length, "Expected a seekable stream with the written length.");
+
+                stream.Seek((2 * 1024 * 1024) + 5, SeekOrigin.Begin);
+                byte[] middle = new byte[100000];
+                int read = await ReadExactlyWithArrayAsync(stream, middle, cancellationToken).ConfigureAwait(false);
+                Require(read == middle.Length && middle.AsSpan().SequenceEqual(payload.AsSpan((2 * 1024 * 1024) + 5, middle.Length)), "Expected 100000 bytes at 2 MiB + 5.");
+
+                stream.Position = 0;
+                byte[] head = new byte[1000];
+                read = await ReadExactlyWithArrayAsync(stream, head, cancellationToken).ConfigureAwait(false);
+                Require(read == head.Length && head.AsSpan().SequenceEqual(payload.AsSpan(0, head.Length)), "Expected the first 1000 bytes after rewinding.");
+
+                stream.Seek(-10, SeekOrigin.End);
+                byte[] tail = new byte[10];
+                read = await ReadExactlyWithArrayAsync(stream, tail, cancellationToken).ConfigureAwait(false);
+                Require(read == 10 && tail.AsSpan().SequenceEqual(payload.AsSpan(payload.Length - 10)), "Expected the last 10 bytes.");
+                Require(await stream.ReadAsync(new byte[16], 0, 16, cancellationToken).ConfigureAwait(false) == 0, "Expected a read at EOF to return 0.");
+
+                stream.Seek(stream.Length + 100, SeekOrigin.Begin);
+                Require(await stream.ReadAsync(new byte[16], 0, 16, cancellationToken).ConfigureAwait(false) == 0, "Expected a read beyond EOF to return 0.");
+            }
+
+            byte[] direct = await session.Files.ReadAsync(path, (ulong)payload.Length, 16, cancellationToken).ConfigureAwait(false);
+            Require(direct.Length == 0, "Expected ReadAsync at EOF to return an empty array.");
+            direct = await session.Files.ReadAsync(path, (ulong)payload.Length + 4096, 16, cancellationToken).ConfigureAwait(false);
+            Require(direct.Length == 0, "Expected ReadAsync beyond EOF to return an empty array.");
+            direct = await session.Files.ReadAsync(path, 7, 0, cancellationToken).ConfigureAwait(false);
+            Require(direct.Length == 0, "Expected a zero-count ReadAsync to return an empty array.");
+            byte[] whole = await session.Files.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            Require(whole.AsSpan().SequenceEqual(payload), "Expected the session to keep working after the stream sequence.");
+        }
+
+        private static async Task<int> ReadExactlyWithArrayAsync(Stream stream, byte[] buffer, CancellationToken cancellationToken)
+        {
+            int total = 0;
+            while (total < buffer.Length)
+            {
+                int read = await stream.ReadAsync(buffer, total, buffer.Length - total, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
+            }
+
+            return total;
         }
 
         private static async Task WriteFromStreamAsync(MountSessionScenarioTarget target, string basePath, CancellationToken cancellationToken)

@@ -44,15 +44,16 @@ namespace OpenNFS.Client
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                uint requestCount = OpenNfsMountSessionReadSupport.AlignedReadCount(offset, transferSizes.ReadSize, transferSizes.ReadSize);
                 OpenNfsV3ReadResult readResult =
-                    await _session.Client.Files.ReadV3Async(fileHandle, offset, (uint)transferSizes.ReadSize, cancellationToken).ConfigureAwait(false);
+                    await _session.Client.Files.ReadV3Async(fileHandle, offset, requestCount, cancellationToken).ConfigureAwait(false);
 
                 if (!readResult.IsSuccess)
                 {
                     throw OpenNfsMountSession.CreateStatusException(ReadOperationName, path, readResult.Status);
                 }
 
-                int received = Math.Min(readResult.Data.Length, transferSizes.ReadSize);
+                int received = Math.Min(readResult.Data.Length, (int)requestCount);
                 if (received > 0)
                 {
                     data.Write(readResult.Data.Span.Slice(0, received));
