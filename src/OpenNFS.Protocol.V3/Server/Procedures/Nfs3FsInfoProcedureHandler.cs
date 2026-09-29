@@ -58,7 +58,8 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                     properties = Nfs3MetadataResolver.CreateUInt32((uint)(
                         Nfs3Constants.FSF3_LINK
                         | Nfs3Constants.FSF3_SYMLINK
-                        | Nfs3Constants.FSF3_HOMOGENEOUS)),
+                        | Nfs3Constants.FSF3_HOMOGENEOUS
+                        | (_server.Capabilities.AttributeMutation is null ? 0UL : Nfs3Constants.FSF3_CANSETTIME))),
                 },
             };
         }

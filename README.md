@@ -6,7 +6,7 @@ OpenNFS is a native C# implementation effort for ONC RPC and NFS. Current scope,
 
 OpenNFS is an ALPHA repository.
 
-- The current package/version line is `v0.1.0`, but that is not a stability or support claim.
+- The current package/version line is `v0.1.1`, but that is not a stability or support claim.
 - Public APIs, runtime behavior, interoperability coverage, CI workflows, and documentation are all subject to change without notice.
 - Only very limited compatibility testing has been done relative to the eventual support bar. Passing local suites, direct-peer tests, Linux peer checks, or archived subset conformance runs does not imply broad protocol, platform, kernel, or client/server compatibility.
 
@@ -34,6 +34,7 @@ This repository is in active implementation and remains alpha.
 - The current server surface now also exposes local export introspection consistently across `OpenNfsServerBuilder`, `OpenNfsServer`, and `OpenNfsServerApplication` through `GetExportsAsync(...)`, which keeps the managed server path closer to the equivalent OpenCIFS local-share snapshot flow without exposing protocol host types.
 - The current NFSv4.0 path now also has a bounded identity service: `OpenNfsClient.Identity` exposes owner/group read and update helpers, and `IOpenNfsClientIdentityPolicy` plus `OpenNfsLinuxStyleIdentityPolicy` let consumers normalize server-returned owner strings into local display names without rewriting the underlying wire values. Direct peer and sample-artifact coverage now passes owner/group round-trips and restart persistence on the managed path, and the shared `IdMapSuites` now also proves real Linux-kernel-mounted `stat` / `chown` behavior against `Sample.OpenNfsServer`.
 - `OpenNFS.Server` now includes a built-in disk-backed `UseLocalFileSystem()` path, so a consumer can stand up a real export without first implementing `INfsFileSystem`.
+- `v0.1.1` hardens and widens the mounted-session client path: `WriteAllBytesAsync` now creates missing files, truncates longer files, continues NFSv3 short writes, and commits unstable data with write-verifier checks; transfers are sized from `FSINFO`; and the session gains ranged and streaming reads (`ReadAsync`, `OpenReadAsync`), streaming writes (`WriteAsync`), `RenameAsync`, `ListWithAttributesAsync` (`READDIRPLUS` with a `READDIR` fallback), `CreateDirectoryAsync(path, createParents, ...)`, `ExistsAsync`, `SetLengthAsync`, and `SetTimesAsync`. NFSv3 `SETATTR` is now available end to end: `FileApis.SetAttributesV3Async(...)` on the client, and the optional `INfsAttributeMutation` host capability (implemented by `UseLocalFileSystem()` and the sample) on the server, so Linux clients can truncate (`O_TRUNC`, `truncate`), `touch -d`, and `chmod` over NFSv3 and NFSv4.0. Opt-in portmapper discovery (`WithPortmapperDiscovery()`) finds `rpc.mountd` on servers such as Linux knfsd. The new `MountSessionSuites` and `InteropMountSessionSuites` cover these paths against OpenNFS, Linux knfsd, NFS-Ganesha, and the Linux kernel client; see [CHANGELOG.md](./CHANGELOG.md).
 - `OpenNFS.Server` now also exposes `OpenNfsServerApplication` as the primary runnable host surface, and the shared suites now validate both direct and clean-package-consumer server startup over real NFSv3 and NFSv4.0 traffic.
 - `Sample.OpenNfsServer` now also consumes the shipped `appsettings.sample.json` through `--config`, so the documented sample bootstrap path is a real runtime path rather than a stale illustrative file.
 - `Sample.OpenNfsServer` now has first-class sample acceptance coverage for config-file startup, Linux kernel mount/read/write, denied mounts, persistent filehandle behavior across restart, and direct NFSv4.0 capability validation for ACLs, owner/group mapping, delegations, conflicting locks, and ACL persistence across restart. The Kerberos provider works end-to-end against the test KDC at the GSS level; the remaining `SampleServerSuites/KerberosMount` gate (Linux kernel `mount -o sec=krb5` against the sample artifact) needs the sample's MOUNT v3 + NFSv3 dispatchers to validate per-call verifier MICs through the registered mechanism on every RPC, which is the next sample-server integration slice.
@@ -53,7 +54,7 @@ This repository is in active implementation and remains alpha.
   - `OpenNFS.Rpc.Transport` abstractions for stream-backed TCP framing, datagram-backed UDP flows, transport timeouts, and explicit v3-era UDP policy gating
   - `OpenNFS.Rpc.RpcBind` primitives for in-memory portmap v2 and rpcbind v3/v4 registration, lookup, unregister, and RPC envelope dispatch flows over the generated corpus
   - `OpenNFS.Rpc.Replay` primitives for expiring reply caches and deterministic request-correlation keys
-  - `OpenNFS.Protocol.V3` core procedure metadata, the first NFSv3 server dispatcher foundation, a dispatcher-level duplicate-request cache for retry-safe v3 replay, filesystem-backed handlers for `GETATTR`, `LOOKUP`, `ACCESS`, `READ`, `READLINK`, `WRITE`, `CREATE`, `MKDIR`, `SYMLINK`, `REMOVE`, `RMDIR`, `RENAME`, `LINK`, `COMMIT`, `READDIR`, `READDIRPLUS`, `FSSTAT`, `FSINFO`, and `PATHCONF`, plus explicit standards-compliant rejection paths for `SETATTR` and `MKNOD` while the corresponding host seams remain unimplemented, the first MOUNT v3 server-side dispatcher for `MNT`, `DUMP`, `UMNT`, `UMNTALL`, and `EXPORT`, the first NLM v4 server-side dispatcher for synchronous `TEST`/`LOCK`/`CANCEL`/`UNLOCK` plus fire-and-forget message/result procedure handling over the public locking seam, and the first NSM server-side dispatcher for `SM_STAT`, `SM_MON`, `SM_UNMON`, `SM_UNMON_ALL`, `SM_SIMU_CRASH`, and `SM_NOTIFY`, including blocked-waiter tracking, unlock-triggered wakeup, in-process granted-callback dispatch, NSM monitor and callback registration state, simulated restart state transitions, grace-period gating for NLM reclaim flows, transport-aware requester identity for replay correlation, and reusable TCP host listeners for MOUNT v3, NFSv3, NLM v4, and NSM, alongside validated export lookup, root filehandle issuance, in-memory mount tracking, host-driven export filtering and mount authorization, deterministic synthetic metadata, real child-path, directory-enumeration, byte-range read, symbolic-link target read, byte-range write, symbolic-link creation, hard-link creation over the current host seam, cross-directory rename and replacement flows, reboot-sensitive per-server write verifiers, requested `UNSTABLE`/`DATA_SYNC`/`FILE_SYNC` write handling, weak cache consistency timestamp and size reporting, cookie-verifier and resumable-directory-read handling, stale-handle, blocked-lock, denied-lock, grace-period, duplicate-replay, and unknown-entry mapping, RPC `GARBAGE_ARGS` handling, malformed `AUTH_SYS` rejection, and explicit `PROC_UNAVAIL` paths for `SETATTR`, `MKNOD`, `SHARE`, `UNSHARE`, `FREE_ALL`, and other non-core work that remains outside the current implementation surface
+  - `OpenNFS.Protocol.V3` core procedure metadata, the first NFSv3 server dispatcher foundation, a dispatcher-level duplicate-request cache for retry-safe v3 replay, filesystem-backed handlers for `GETATTR`, `LOOKUP`, `ACCESS`, `READ`, `READLINK`, `WRITE`, `CREATE`, `MKDIR`, `SYMLINK`, `REMOVE`, `RMDIR`, `RENAME`, `LINK`, `COMMIT`, `READDIR`, `READDIRPLUS`, `FSSTAT`, `FSINFO`, and `PATHCONF`, plus `SETATTR` size, mode, and timestamp changes routed through the optional `INfsAttributeMutation` host capability (with the previous standards-compliant rejection when a host does not implement it) and an explicit standards-compliant rejection path for `MKNOD`, the first MOUNT v3 server-side dispatcher for `MNT`, `DUMP`, `UMNT`, `UMNTALL`, and `EXPORT`, the first NLM v4 server-side dispatcher for synchronous `TEST`/`LOCK`/`CANCEL`/`UNLOCK` plus fire-and-forget message/result procedure handling over the public locking seam, and the first NSM server-side dispatcher for `SM_STAT`, `SM_MON`, `SM_UNMON`, `SM_UNMON_ALL`, `SM_SIMU_CRASH`, and `SM_NOTIFY`, including blocked-waiter tracking, unlock-triggered wakeup, in-process granted-callback dispatch, NSM monitor and callback registration state, simulated restart state transitions, grace-period gating for NLM reclaim flows, transport-aware requester identity for replay correlation, and reusable TCP host listeners for MOUNT v3, NFSv3, NLM v4, and NSM, alongside validated export lookup, root filehandle issuance, in-memory mount tracking, host-driven export filtering and mount authorization, deterministic synthetic metadata, real child-path, directory-enumeration, byte-range read, symbolic-link target read, byte-range write, symbolic-link creation, hard-link creation over the current host seam, cross-directory rename and replacement flows, reboot-sensitive per-server write verifiers, requested `UNSTABLE`/`DATA_SYNC`/`FILE_SYNC` write handling, weak cache consistency timestamp and size reporting, cookie-verifier and resumable-directory-read handling, stale-handle, blocked-lock, denied-lock, grace-period, duplicate-replay, and unknown-entry mapping, RPC `GARBAGE_ARGS` handling, malformed `AUTH_SYS` rejection, and explicit `PROC_UNAVAIL` paths for `MKNOD`, `SHARE`, `UNSHARE`, `FREE_ALL`, and other non-core work that remains outside the current implementation surface
   - `OpenNFS.Protocol.V40` the first NFSv4.0 COMPOUND server foundation, including minor-version mismatch handling, current and saved filehandle state, `OP_ILLEGAL` shaping, partial attribute encoding for `SUPPORTED_ATTRS`/`TYPE`/`CHANGE`/`SIZE`/`FILEHANDLE` plus owner and owner-group identity strings when the host exposes id mapping and ACL plus ACL-support attribute handling when the host exposes `INfsAcls`, the current namespace plus mutation slice over the public host contracts (`PUTROOTFH`, `PUTPUBFH`, `PUTFH`, `SAVEFH`, `RESTOREFH`, `GETFH`, `GETATTR`, `SETATTR` for ACL replacement, `ACCESS`, `VERIFY`, `NVERIFY`, `LOOKUP`, `LOOKUPP`, `SECINFO`, `READ`, `READDIR`, `READLINK`, `CREATE` for directory and symbolic-link objects, `LINK`, `RENAME`, and generic `REMOVE`), explicit capability-gated `OPENATTR`, `DELEGPURGE`, and `RELEASE_LOCKOWNER` responses for the current advertised feature set, the first in-memory stateful-open slice with `SETCLIENTID`, `SETCLIENTID_CONFIRM`, `OPEN`, `OPEN_CONFIRM`, `OPEN_DOWNGRADE`, `RENEW`, and `CLOSE`, the first stateful transfer slice with `WRITE` and `COMMIT` validated against open and lock stateids with reboot-sensitive write verifiers, the first byte-range locking plus simulated grace-period reclaim slice with `LOCKT`, `LOCK`, `LOCKU`, `CLAIM_PREVIOUS` reclaim open, reclaim-aware `LOCK`, clientid confirmation, lease refresh, share reservations, open-owner and lock-owner seqids, lock-owner tables, `GRACE` / `NO_GRACE` / `RECLAIM_BAD` handling, and stateid tracking, plus the first delegation slice with host-backed grant, conflict-driven recall notification, `NFS4ERR_DELAY` conflict shaping, and `DELEGRETURN`, alongside a reusable TCP `OpenNfsTcpNfs40ServerHost` for the current NFSv4.0 wire surface
   - `OpenNFS.Server` export-resolution validation over the public host contracts, including static and provider-backed export composition, host-driven mount authorization and export visibility decisions, stable capability discovery for locking, ACLs, delegations, copy/clone, sparse files, and identity mapping, a protocol-neutral `INfsLocking` request/response seam for advisory byte-range locks, typed host operation contexts, plus default and persistent filehandle policy surfaces
   - a runnable `Sample.OpenNfsServer` artifact that seeds a minimal export tree by default, serves the current TCP MOUNT v3, NFSv3, and NFSv4.0 surfaces through the public `OpenNfsServerApplication` wrapper over the internal protocol hosts, supports persistent filehandle mappings, persistent ACL state, configurable owner and owner-group identity mapping, the current delegation and locking baseline, consumes the shipped config file through `--config` with config-relative source and state paths, and can be exercised by both `OpenNFS.Client` and real Linux clients in the shared interop suite
@@ -111,17 +112,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\release\Assert-NoSkippedTests
 powershell -ExecutionPolicy Bypass -File .\scripts\release\Assert-ReleaseChecklist.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release\Assert-RepositoryHonesty.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\release\Invoke-ReleaseValidation.ps1 -PlanOnly -IncludePack
-dotnet run --project src\Test.Automated\Test.Automated.csproj -- --results artifacts\touchstone-results.json
-dotnet run --project src\Test.Automated\Test.Automated.csproj -- --suite IdMapSuites --suite SampleServerSuites --suite InteropSuites --results artifacts\touchstone-targeted.json
-dotnet test src\Test.Xunit\Test.Xunit.csproj -c Release
-dotnet test src\Test.Nunit\Test.Nunit.csproj -c Release
+dotnet run --project src\Test.Automated\Test.Automated.csproj -c Release --no-build --framework net10.0 -- --results artifacts\touchstone-results.json
+dotnet run --project src\Test.Automated\Test.Automated.csproj -c Release --no-build --framework net10.0 -- --suite MountSessionSuites --suite InteropMountSessionSuites --results artifacts\touchstone-targeted.json
+dotnet test src\Test.Xunit\Test.Xunit.csproj -c Release --no-build
+dotnet test src\Test.Nunit\Test.Nunit.csproj -c Release --no-build
 ```
 
 When the local Docker daemon is reachable, the shared runners also execute the Docker-backed `InteropSuites`. When Docker is unavailable, those cases are skipped with an explicit reason instead of failing unrelated validation.
 
 `Test.Automated` is the exhaustive runner. It executes the full shared Touchstone catalog, including Docker-backed interop, packaged-consumer validation, and other heavyweight matrix cases. `Test.Xunit` and `Test.Nunit` are now adapter-smoke projects over the unit-tagged subset of that catalog so the same heavy matrix is not rerun three times.
 
-`Test.Automated` now also accepts repeated `--suite <SuiteId>` filters for targeted validation when you only need the suites touched by a slice instead of the full matrix.
+`Test.Automated` now also accepts repeated `--suite <SuiteId>` filters (and `--case <CaseId>`) for targeted validation when you only need the suites touched by a slice instead of the full matrix. `Test.Automated` multi-targets `net8.0` and `net10.0`, so `dotnet run` needs `--framework`; the packaging and sample-artifact cases expect a prior `dotnet build src/OpenNFS.sln -c Release`.
+
+`MountSessionSuites` covers the mounted-session client surface, NFSv3 and NFSv4.0 `SETATTR`, the attribute-mutation capability, fault-injected short writes, write-verifier changes, restrictive `FSINFO` limits, `READDIRPLUS` fallback, and portmapper discovery against in-process servers. `InteropMountSessionSuites` runs the same mounted-session scenario matrix (including 1,500-entry listings and 32-way concurrency) against Docker Linux knfsd and NFS-Ganesha peers, portmapper discovery against knfsd's rpcbind, and Linux kernel client truncation over NFSv3 and NFSv4.0 against `Sample.OpenNfsServer`.
 
 The formal support-claim gate is tracked in [docs/release-checklist.md](./docs/release-checklist.md). The release scripts now validate that checklist, ban explicit skipped-test markers in source, validate that the repo still carries the required no-overclaim disclaimers and no placeholder markers in implementation code, and require fresh non-synthetic conformance manifests for `pjdfstest`, Connectathon, and `pynfs` before a support claim can advance.
 
@@ -250,11 +253,151 @@ disconnectResult.EnsureSuccess();
 The current mounted-session contract is intentionally narrow and explicit:
 
 - Resolution is scoped to the mounted export root.
-- Paths are re-resolved on each operation; there is no local handle cache.
+- Paths are re-resolved on each operation; there is no local handle cache. Server transfer sizes (`FSINFO`) are fetched once per session and cached.
 - Same-session create, write, rename, and delete operations are immediately visible through that same session.
-- One session is safe for concurrent path operations on the current tested NFSv3 mounted-export path.
+- One session (and one client) is safe for concurrent operations: RPCs are multiplexed by a unique, randomly seeded xid over a small pool of persistent TCP connections per endpoint (default 4, `WithMaxConnectionsPerEndpoint(...)`; idle connections close after `WithIdleConnectionTimeout(...)`, default 30 seconds), and 32-way concurrent read/write/lookup/list stress passes against OpenNFS, knfsd, and NFS-Ganesha. A broken connection fails its in-flight calls with `OpenNfsClientIoException`; the next call reconnects. Idempotent calls follow the retry policy; non-idempotent calls are not retransmitted after a disconnect.
+- Path components are used verbatim (leading, trailing, and repeated spaces and Unicode are preserved); only `/` (and `\`) separate components, and `.`/`..` are rejected. A Windows-hosted `UseLocalFileSystem()` server rejects names Windows cannot store verbatim (trailing space or dot, `<>:"|?*`, device names such as `CON`) with `NFS3ERR_INVAL` instead of aliasing them.
+- Disposing a session created by `MountAsync(...)` sends a best-effort MOUNT `UMNT`; it never throws.
 - No cross-session coherence guarantee is implied.
 - Relative navigation segments such as `.` and `..` are rejected.
+
+### Mounted-session file, directory, and metadata APIs
+
+`OpenNfsMountSession` covers whole-file, ranged, and streaming I/O plus the usual namespace and metadata operations. Every call takes a required `CancellationToken`; failures surface as `OpenNfsV3StatusException` (with the native `Status`), `OpenNfsClientProtocolException`, or `OpenNfsClientIoException`.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Threading;
+using OpenNFS.Client;
+
+CancellationToken cancellationToken = CancellationToken.None;
+
+await using OpenNfsClient client = new OpenNfsClientBuilder()
+    .WithPrimaryEndpoint("nfs.example.net", 2049)
+    .WithMountEndpoint("nfs.example.net", 20048)
+    .Build();
+await client.ConnectAsync(cancellationToken);
+await using OpenNfsMountSession session = await client.MountAsync("/data", cancellationToken);
+
+// Directories: mkdir -p semantics, existence checks, and listings with attributes (READDIRPLUS).
+await session.Directories.CreateDirectoryAsync("/blobs/2026/09", createParents: true, cancellationToken);
+bool exists = await session.Metadata.ExistsAsync("/blobs/2026/09", cancellationToken);
+IReadOnlyList<OpenNfsV3DirectoryPlusEntry> entries =
+    await session.Directories.ListWithAttributesAsync("/blobs/2026/09", cancellationToken);
+foreach (OpenNfsV3DirectoryPlusEntry entry in entries)
+{
+    Console.WriteLine(entry.Name + " " + entry.Attributes!.SizeBytes + " " + entry.Attributes.ModifyTime.ToDateTimeUtc().ToString("O"));
+}
+
+// Whole-file writes create the file when missing and leave it exactly equal to the payload.
+await session.Files.WriteAllBytesAsync("/blobs/2026/09/a.bin", Encoding.UTF8.GetBytes("hello"), OpenNfsWriteStability.Unstable, cancellationToken);
+
+// Streaming writes: null length copies to end of stream; an explicit length must be fully available.
+using (FileStream source = File.OpenRead(@"C:\temp\large.bin"))
+{
+    await session.Files.WriteAsync("/blobs/2026/09/large.bin", source, length: null, OpenNfsWriteStability.Unstable, cancellationToken);
+}
+
+// Ranged reads and a lazily-fetched, seekable read stream.
+byte[] firstBytes = await session.Files.ReadAsync("/blobs/2026/09/large.bin", offset: 0, count: 4096, cancellationToken);
+await using (Stream stream = await session.Files.OpenReadAsync("/blobs/2026/09/large.bin", cancellationToken))
+{
+    stream.Seek(-16, SeekOrigin.End);
+    byte[] tail = new byte[16];
+    int read = await stream.ReadAsync(tail, cancellationToken);
+}
+
+// Rename (files or directories), truncate or extend, and set timestamps.
+await session.Files.RenameAsync("/blobs/2026/09/a.bin", "/blobs/2026/09/b.bin", cancellationToken);
+await session.Metadata.SetLengthAsync("/blobs/2026/09/b.bin", 2, cancellationToken);
+await session.Metadata.SetTimesAsync("/blobs/2026/09/b.bin", accessTimeUtc: null, modifyTimeUtc: DateTime.UtcNow.AddDays(-1), cancellationToken);
+```
+
+Write semantics shared by `WriteAllBytesAsync` and `WriteAsync`:
+
+- A missing file is created with `CREATE` (UNCHECKED); the parent directory must already exist (`NoEntry` otherwise), and a directory target fails with `IsDirectory`.
+- After the data is written, a longer existing file is truncated with `SETATTR`, so the result is exactly the payload; an empty payload produces an empty file.
+- NFSv3 short writes are continued from `offset + count`; a zero-byte acknowledgement is a protocol error.
+- When any `WRITE` reply is weaker than `FILE_SYNC`, the client sends `COMMIT` and checks the write verifier. If the verifier changed (for example after a server restart), the data is rewritten once with `FILE_SYNC` (RFC 1813 section 3.3.21). Non-seekable `WriteAsync` sources cannot be replayed, so that case throws `OpenNfsClientIoException`, as does a verifier that keeps changing.
+- Transfers are chunked by the server's `FSINFO` preferred sizes (bounded by the advertised maximums), fetched once per mounted session, with a 64 KiB fallback.
+
+For lower-level control, `client.Files.SetAttributesV3Async(...)` issues NFSv3 `SETATTR` directly with an `OpenNfsV3SetAttributes` change set (mode, uid, gid, size, and access/modify time as don't-change, server time, or client time) and an optional ctime guard that yields `OpenNfsV3Status.NotSynchronized` on mismatch. `TrySetAttributesV3Async(...)` and `PrepareSetAttributesV3Async(...)` follow the usual non-throwing and planning conventions. `OpenNfsV3Time.ToDateTimeUtc()` and `OpenNfsV3Time.FromDateTimeUtc(...)` convert NFSv3 timestamps.
+
+### Portmapper discovery
+
+Many NFSv3 servers (Linux knfsd in particular) run `rpc.mountd` on a port registered with rpcbind rather than on a fixed port. Discovery is opt-in:
+
+```csharp
+using System;
+using System.Threading;
+using OpenNFS.Client;
+
+CancellationToken cancellationToken = CancellationToken.None;
+
+await using OpenNfsClient client = new OpenNfsClientBuilder()
+    .WithServer("nfs.example.net")          // no explicit NFS port: NFSv3 is discovered too
+    .WithPortmapperDiscovery()               // PMAPPROC_GETPORT over TCP, program 100000 version 2
+    .WithPortmapperPort(111)                 // default
+    .Build();
+
+await client.ConnectAsync(cancellationToken);   // queries the portmapper when discovery is enabled
+Console.WriteLine(client.DiscoveredMountEndpoint + " / " + client.DiscoveredNfsEndpoint);
+await using OpenNfsMountSession session = await client.MountAsync("/data", cancellationToken);
+```
+
+Explicitly configured endpoints always win: `WithMountEndpoint(...)`/`WithMountPort(...)` skip MOUNT discovery, and an explicit NFS port (`WithServer(host, port)`, `WithServerPort(...)`, `WithPrimaryEndpoint(...)`) skips NFSv3 discovery. If the portmapper is unreachable or answers port `0`, the client falls back to its configured endpoints, and a mount that then fails carries a message naming the portmapper result and suggesting `WithMountEndpoint`.
+
+### Ephemeral in-process server for tests
+
+A test harness can host MOUNT v3 plus NFSv3 on loopback ephemeral ports, serving a temporary directory, entirely through the public `OpenNFS.Server` surface. Pass `0` for a port to let the OS choose, then read the bound ports after `StartAsync(...)`:
+
+```csharp
+using System;
+using System.IO;
+using System.Threading;
+using OpenNFS.Client;
+using OpenNFS.Server;
+using OpenNFS.Server.FileHandles;
+
+CancellationToken cancellationToken = CancellationToken.None;
+string stateDirectory = Path.Combine(Path.GetTempPath(), "nfs-test-" + Guid.NewGuid().ToString("N"));
+string exportDirectory = Path.Combine(stateDirectory, "export");
+Directory.CreateDirectory(exportDirectory);
+
+await using OpenNfsServerApplication app = new OpenNfsServerBuilder()
+    .UseLocalFileSystem()
+    .UseFileHandleProvider(new PersistentMappingHandleProvider(Path.Combine(stateDirectory, "handles.json")))
+    .AddExport("/export", exportDirectory)
+    .BuildApplication(new OpenNfsServerApplicationOptions
+    {
+        ListenerAddress = "127.0.0.1",
+        MountPort = 0,       // 0 = ephemeral; use a fixed port if you need a known one
+        NfsPort = 0,
+        EnableNfs40 = false,
+    });
+
+await app.StartAsync(cancellationToken);
+int mountPort = app.MountPort;   // bound ports are available after StartAsync
+int nfsPort = app.NfsPort;
+
+await using OpenNfsClient client = new OpenNfsClientBuilder()
+    .WithPrimaryEndpoint("127.0.0.1", nfsPort)
+    .WithMountEndpoint("127.0.0.1", mountPort)
+    .Build();
+await client.ConnectAsync(cancellationToken);
+await using (OpenNfsMountSession session = await client.MountAsync("/export", cancellationToken))
+{
+    await session.Files.WriteAllBytesAsync("/hello.txt", new byte[] { 1, 2, 3 }, OpenNfsWriteStability.FileSync, cancellationToken);
+}
+
+await app.StopAsync(cancellationToken);   // or just dispose; ports reset to 0 after stopping
+Directory.Delete(stateDirectory, recursive: true);
+```
+
+`UseLocalFileSystem()` implements the attribute-mutation capability, so truncation, `SetLengthAsync`, `SetTimesAsync`, and `SETATTR` work against this server. Pair it with `PersistentMappingHandleProvider` as shown: the default intrinsic filehandle provider embeds the source path in the handle, which exceeds the 64-byte NFSv3 filehandle limit for typical temporary-directory paths and makes `MOUNT` fail with `MNT3ERR_SERVERFAULT`. `OpenNFS.Client` and `OpenNFS.Server` can be referenced from the same project; they ship identical copies of their shared internal runtime assemblies.
 
 ### NFSv4.0 client example
 
@@ -412,7 +555,7 @@ The current backend contract splits into mandatory and optional pieces:
 
 - Mandatory: `INfsFileSystem` or the built-in `UseLocalFileSystem()` path, plus at least one configured export.
 - Strongly recommended on the current NFSv3-mounted path: `PersistentMappingHandleProvider` for restart-safe, MOUNT-compatible filehandles.
-- Optional capability seams: `INfsMountAuthorization`, `INfsLocking`, `INfsAcls`, `INfsDelegations`, `INfsIdMapper`, `INfsSparse`, and `INfsCopyClone`.
+- Optional capability seams: `INfsMountAuthorization`, `INfsLocking`, `INfsAcls`, `INfsDelegations`, `INfsIdMapper`, `INfsSparse`, `INfsCopyClone`, and `INfsAttributeMutation` (NFSv3 `SETATTR` and NFSv4.0 `SETATTR`/`OPEN` create attributes for size, timestamps, and mode; implemented by `UseLocalFileSystem()`, discovered automatically on the file system or registered with `UseAttributeMutation(...)`). Without `INfsAttributeMutation`, size and mode changes are rejected with `NFS3ERR_NOTSUPP` / `NFS4ERR_ATTRNOTSUPP`, so clients cannot truncate files.
 
 If an optional capability is absent, the current server surface leaves it unadvertised or returns standards-compliant capability-gated failures on the covered protocol paths. Backend authors do not need every optional capability just to serve browse, read, write, and directory-management traffic.
 
@@ -541,6 +684,10 @@ Only the following projects are configured as packable public packages:
 The internal protocol, RPC, test, and tooling projects are intentionally non-packable.
 
 `OpenNFS.Client` currently bundles the internal runtime assemblies it needs for real execution, including `OpenNFS.Rpc`, `OpenNFS.Protocol.V3`, `OpenNFS.Protocol.V40`, and `OpenNFS.Server`, because those are implementation details rather than separate public NuGet packages.
+
+`OpenNFS.Client` and `OpenNFS.Server` can be referenced from the same project (for example a test project that hosts an in-process server): both packages carry identical builds of the shared internal assemblies from the same version.
+
+Both packages declare `PackageLicenseExpression` `MIT`, carry this README, Source Link repository metadata (`https://github.com/jchristn/OpenNFS`), XML documentation for the public and bundled assemblies, and a `.snupkg` symbol package that includes the PDBs of the bundled internal assemblies.
 
 `OpenNFS.Server` now does the same for its runnable application surface. The public package includes `OpenNFS.Rpc`, `OpenNFS.Protocol.V3`, and `OpenNFS.Protocol.V40`, which is what allows `BuildApplication()` to start the current internal wire hosts without asking consumers to reference non-public packages directly.
 

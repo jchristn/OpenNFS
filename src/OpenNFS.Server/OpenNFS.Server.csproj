@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>Public server hosting surface for OpenNFS.</Description>
+    <Description>Native C# NFS server hosting surface (ONC RPC, MOUNT v3, NFSv3, NFSv4.x) with a built-in local file system backend, pluggable host capabilities including SETATTR attribute mutation, and an embeddable OpenNfsServerApplication suitable for in-process test servers. Alpha.</Description>
     <IsPackable>true</IsPackable>
     <PackageId>OpenNFS.Server</PackageId>
-    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Title>OpenNFS.Server</Title>
-    <PackageTags>nfs;server;onc-rpc</PackageTags>
+    <PackageTags>nfs;nfsv3;nfsv4;server;onc-rpc;mount;storage</PackageTags>
+    <PackageReleaseNotes>v0.1.1: fixes WriteAllBytesAsync truncation, create-if-missing, short writes, COMMIT/verifier handling, and FSINFO-sized transfers; adds NFSv3 SETATTR (client API and server INfsAttributeMutation capability), ranged/stream reads, stream writes, rename, READDIRPLUS listings, mkdir -p, exists/set-length/set-times, opt-in portmapper discovery, persistent multiplexed TCP connections (no connection per RPC), and verbatim path components. See CHANGELOG.md.</PackageReleaseNotes>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

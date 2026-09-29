@@ -20,7 +20,12 @@ namespace OpenNFS.Client
         private OpenNfsRetryPolicy _RetryPolicy = new OpenNfsRetryPolicy();
         private TimeSpan _ResponseTimeout = TimeSpan.FromSeconds(30);
         private string _ServerHost = "localhost";
+        private int _PortmapperPort = 111;
+        private int _MaxConnectionsPerEndpoint = 4;
+        private TimeSpan _IdleConnectionTimeout = TimeSpan.FromSeconds(30);
+        private bool _EnablePortmapperDiscovery;
         private int _ServerPort = 2049;
+        private bool _ServerPortExplicit;
         private OpenNfsClientTransportPolicy _TransportPolicy = OpenNfsClientTransportPolicy.TcpOnly;
 
         /// <summary>
@@ -30,7 +35,9 @@ namespace OpenNFS.Client
         /// <returns>The current builder instance.</returns>
         public OpenNfsClientBuilder WithServer(string serverHost)
         {
-            return WithPrimaryEndpoint(serverHost, 2049);
+            WithPrimaryEndpoint(serverHost, 2049);
+            _ServerPortExplicit = false;
+            return this;
         }
 
         /// <summary>
@@ -75,6 +82,7 @@ namespace OpenNFS.Client
             }
 
             _ServerPort = serverPort;
+            _ServerPortExplicit = true;
             return this;
         }
 
@@ -89,6 +97,7 @@ namespace OpenNFS.Client
             ArgumentNullException.ThrowIfNull(endpoint);
             _ServerHost = endpoint.Host;
             _ServerPort = endpoint.Port;
+            _ServerPortExplicit = true;
             return this;
         }
 
@@ -142,6 +151,77 @@ namespace OpenNFS.Client
             }
 
             _MountServerPort = mountServerPort;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximum number of persistent TCP connections kept per remote endpoint.
+        /// Each pooled connection multiplexes many outstanding RPCs by transaction id, so a small pool serves highly concurrent workloads.
+        /// Default value: <c>4</c>.
+        /// </summary>
+        /// <param name="maxConnectionsPerEndpoint">Connection limit between 1 and 64.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="maxConnectionsPerEndpoint"/> is outside the supported range.</exception>
+        public OpenNfsClientBuilder WithMaxConnectionsPerEndpoint(int maxConnectionsPerEndpoint)
+        {
+            if (maxConnectionsPerEndpoint < 1 || maxConnectionsPerEndpoint > 64)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxConnectionsPerEndpoint), maxConnectionsPerEndpoint, "The maximum connections per endpoint must be between 1 and 64.");
+            }
+
+            _MaxConnectionsPerEndpoint = maxConnectionsPerEndpoint;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets how long an unused pooled TCP connection stays open before the client closes it.
+        /// Keep this below the server's own idle-connection timeout. Default value: <c>00:00:30</c>.
+        /// </summary>
+        /// <param name="idleConnectionTimeout">Idle timeout greater than zero and no more than one hour.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="idleConnectionTimeout"/> is outside the supported range.</exception>
+        public OpenNfsClientBuilder WithIdleConnectionTimeout(TimeSpan idleConnectionTimeout)
+        {
+            if (idleConnectionTimeout <= TimeSpan.Zero || idleConnectionTimeout > TimeSpan.FromHours(1))
+            {
+                throw new ArgumentOutOfRangeException(nameof(idleConnectionTimeout), idleConnectionTimeout, "The idle connection timeout must be greater than zero and no more than one hour.");
+            }
+
+            _IdleConnectionTimeout = idleConnectionTimeout;
+            return this;
+        }
+
+        /// <summary>
+        /// Enables or disables portmapper (rpcbind) discovery of the MOUNT v3 and NFSv3 ports.
+        /// When enabled, the first MOUNT v3 or NFSv3 operation queries the server's portmapper (program 100000, version 2,
+        /// <c>PMAPPROC_GETPORT</c> over TCP) for MOUNT v3 over TCP, and for NFSv3 over TCP only when the NFS port was not set explicitly.
+        /// Explicitly configured mount endpoints or ports and explicit NFS ports always take precedence.
+        /// When the portmapper is unreachable or reports port <c>0</c>, the client falls back to its configured endpoints.
+        /// Discovery is disabled by default.
+        /// </summary>
+        /// <param name="enabled">True to enable portmapper discovery.</param>
+        /// <returns>The current builder instance.</returns>
+        public OpenNfsClientBuilder WithPortmapperDiscovery(bool enabled = true)
+        {
+            _EnablePortmapperDiscovery = enabled;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the TCP port of the server's portmapper (rpcbind) used for discovery.
+        /// Default value: <c>111</c>.
+        /// </summary>
+        /// <param name="portmapperPort">Portmapper TCP port between 1 and 65535.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="portmapperPort"/> is outside the supported range.</exception>
+        public OpenNfsClientBuilder WithPortmapperPort(int portmapperPort)
+        {
+            if (portmapperPort < 1 || portmapperPort > 65535)
+            {
+                throw new ArgumentOutOfRangeException(nameof(portmapperPort), portmapperPort, "The portmapper port must be between 1 and 65535.");
+            }
+
+            _PortmapperPort = portmapperPort;
             return this;
         }
 
@@ -374,7 +454,9 @@ namespace OpenNFS.Client
                 retryPolicy: _RetryPolicy,
                 mountEndpoint: ResolveMountEndpoint(),
                 identityPolicy: _IdentityPolicy,
-                rpcSecGssOptions: _RpcSecGssOptions);
+                rpcSecGssOptions: _RpcSecGssOptions)
+                .ApplyPortmapperOptions(_EnablePortmapperDiscovery, _PortmapperPort, _ServerPortExplicit)
+                .ApplyConnectionPoolOptions(_MaxConnectionsPerEndpoint, _IdleConnectionTimeout);
         }
 
         /// <summary>

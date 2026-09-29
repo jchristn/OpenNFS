@@ -960,7 +960,7 @@ namespace OpenNFS.Server.Internal.V41
                     new fattr4_fileid { Value = fileId }.WriteTo(writer);
                     break;
                 case Nfs41Constants.FATTR4_MODE:
-                    new fattr4_mode { Value = new mode4 { Value = CreateMode(resolvedHandle.PathInfo.Kind) } }.WriteTo(writer);
+                    new fattr4_mode { Value = new mode4 { Value = resolvedHandle.PathInfo.Mode ?? CreateMode(resolvedHandle.PathInfo.Kind) } }.WriteTo(writer);
                     break;
                 case Nfs41Constants.FATTR4_NUMLINKS:
                     new fattr4_numlinks { Value = resolvedHandle.PathInfo.Kind == NfsPathKind.Directory ? 2U : 1U }.WriteTo(writer);

@@ -211,26 +211,7 @@ namespace Test.Shared.Infrastructure
 
         private static async Task RemoveContainerAsync(string containerName)
         {
-            if (string.IsNullOrWhiteSpace(containerName))
-            {
-                return;
-            }
-
-            try
-            {
-                _ = await DockerCli.RunAsync(
-                    new List<string>
-                    {
-                        "rm",
-                        "--force",
-                        containerName,
-                    },
-                    CancellationToken.None,
-                    timeout: TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-            }
+            await DockerContainerCleanup.RemoveAsync(containerName).ConfigureAwait(false);
         }
 
         private static void WriteDockerNuGetConfig(string configPath)

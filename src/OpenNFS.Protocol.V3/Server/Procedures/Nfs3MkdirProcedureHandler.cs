@@ -80,7 +80,8 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 || exception is NotSupportedException
                 || exception is System.IO.DirectoryNotFoundException
                 || exception is System.IO.FileNotFoundException
-                || exception is System.IO.PathTooLongException)
+                || exception is System.IO.PathTooLongException
+                || exception is ArgumentException)
             {
                 NfsPathInfo parentAfterException =
                     await Nfs3DirectoryMutationSupport.GetPathInfoAsync(

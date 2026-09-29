@@ -7,16 +7,29 @@ namespace OpenNFS.Client
 
     /// <summary>
     /// Represents an export-scoped client session for path-first NFSv3 file and directory work.
+    /// Every member is safe to call concurrently from multiple threads.
     /// </summary>
     public sealed class OpenNfsMountSession : IDisposable, IAsyncDisposable
     {
+        private static readonly TimeSpan UnmountOnDisposeTimeout = TimeSpan.FromSeconds(5);
+
         private readonly OpenNfsClient _client;
+        private readonly bool _ownsMount;
         private readonly byte[] _rootFileHandle;
+        private readonly object _transferSizesSyncRoot = new object();
+        private int _disposed;
+        private Task<OpenNfsMountSessionTransferSizes>? _transferSizesTask;
 
         internal OpenNfsMountSession(OpenNfsClient client, string exportPath, byte[] rootFileHandle)
+            : this(client, exportPath, rootFileHandle, ownsMount: false)
+        {
+        }
+
+        internal OpenNfsMountSession(OpenNfsClient client, string exportPath, byte[] rootFileHandle, bool ownsMount)
         {
             ArgumentNullException.ThrowIfNull(client);
             _client = client;
+            _ownsMount = ownsMount;
             ExportPath = OpenNfsClientArgument.RequireText(exportPath, nameof(exportPath));
             _rootFileHandle = OpenNfsClientArgument.RequireBytes(rootFileHandle, nameof(rootFileHandle), allowEmpty: false);
             Files = new OpenNfsMountSessionFiles(this);
@@ -69,20 +82,48 @@ namespace OpenNFS.Client
 
         /// <summary>
         /// Releases mounted-session resources synchronously.
-        /// The current mounted-session abstraction does not own the underlying client lifetime.
+        /// Sessions created by <see cref="OpenNfsClient.MountAsync(string, CancellationToken)"/> send a best-effort MOUNT v3
+        /// <c>UMNT</c> for the export; failures are ignored and this method never throws.
+        /// The mounted-session abstraction does not own the underlying client lifetime.
         /// </summary>
         public void Dispose()
         {
+            try
+            {
+                DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch (Exception)
+            {
+            }
         }
 
         /// <summary>
         /// Releases mounted-session resources asynchronously.
-        /// The current mounted-session abstraction does not own the underlying client lifetime.
+        /// Sessions created by <see cref="OpenNfsClient.MountAsync(string, CancellationToken)"/> send a best-effort MOUNT v3
+        /// <c>UMNT</c> for the export; failures are ignored and this method never throws.
+        /// The mounted-session abstraction does not own the underlying client lifetime.
         /// </summary>
-        /// <returns>A completed value task.</returns>
-        public ValueTask DisposeAsync()
+        /// <returns>A task that completes when disposal has finished.</returns>
+        public async ValueTask DisposeAsync()
         {
-            return ValueTask.CompletedTask;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0 || !_ownsMount)
+            {
+                return;
+            }
+
+            if (_client.State != OpenNfsClientState.Open)
+            {
+                return;
+            }
+
+            try
+            {
+                using CancellationTokenSource timeoutTokenSource = new CancellationTokenSource(UnmountOnDisposeTimeout);
+                await _client.Exports.UnmountV3Async(ExportPath, timeoutTokenSource.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         internal OpenNfsClient Client
@@ -93,16 +134,66 @@ namespace OpenNFS.Client
             }
         }
 
+        internal Task<OpenNfsMountSessionTransferSizes> GetTransferSizesAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            lock (_transferSizesSyncRoot)
+            {
+                if (_transferSizesTask is null
+                    || _transferSizesTask.IsFaulted
+                    || _transferSizesTask.IsCanceled)
+                {
+                    _transferSizesTask = LoadTransferSizesAsync();
+                }
+
+                return _transferSizesTask.WaitAsync(cancellationToken);
+            }
+        }
+
         internal async Task<byte[]> ResolvePathHandleOrThrowAsync(string path, string operationName, CancellationToken cancellationToken)
         {
             string[] pathComponents = NormalizePathComponents(path, allowRootPath: true);
-            (OpenNfsV3Status Status, byte[] FileHandle) resolution = await ResolvePathHandleAsync(pathComponents, cancellationToken).ConfigureAwait(false);
+            OpenNfsMountSessionResolution resolution = await ResolvePathAsync(pathComponents, cancellationToken).ConfigureAwait(false);
             if (resolution.Status != OpenNfsV3Status.Ok)
             {
                 throw CreateStatusException(operationName, path, resolution.Status);
             }
 
             return resolution.FileHandle;
+        }
+
+        internal async Task<OpenNfsMountSessionResolution> ResolvePathAsync(string path, CancellationToken cancellationToken)
+        {
+            string[] pathComponents = NormalizePathComponents(path, allowRootPath: true);
+            return await ResolvePathAsync(pathComponents, cancellationToken).ConfigureAwait(false);
+        }
+
+        internal async Task<OpenNfsMountSessionResolution> ResolvePathWithAttributesOrThrowAsync(
+            string path,
+            string operationName,
+            CancellationToken cancellationToken)
+        {
+            string[] pathComponents = NormalizePathComponents(path, allowRootPath: true);
+            OpenNfsMountSessionResolution resolution = await ResolvePathAsync(pathComponents, cancellationToken).ConfigureAwait(false);
+            if (resolution.Status != OpenNfsV3Status.Ok)
+            {
+                throw CreateStatusException(operationName, path, resolution.Status);
+            }
+
+            if (resolution.Attributes is not null)
+            {
+                return resolution;
+            }
+
+            OpenNfsV3GetAttributesResult attributesResult =
+                await _client.Files.GetAttributesV3Async(resolution.FileHandle, cancellationToken).ConfigureAwait(false);
+            if (!attributesResult.IsSuccess || attributesResult.Attributes is null)
+            {
+                throw CreateStatusException(operationName, path, attributesResult.Status);
+            }
+
+            return new OpenNfsMountSessionResolution(OpenNfsV3Status.Ok, resolution.FileHandle, attributesResult.Attributes);
         }
 
         internal async Task<(byte[] ParentHandle, string EntryName)> ResolveParentOrThrowAsync(
@@ -123,13 +214,18 @@ namespace OpenNFS.Client
                 Array.Copy(pathComponents, parentComponents, parentComponents.Length);
             }
 
-            (OpenNfsV3Status Status, byte[] FileHandle) resolution = await ResolvePathHandleAsync(parentComponents, cancellationToken).ConfigureAwait(false);
+            OpenNfsMountSessionResolution resolution = await ResolvePathAsync(parentComponents, cancellationToken).ConfigureAwait(false);
             if (resolution.Status != OpenNfsV3Status.Ok)
             {
                 throw CreateStatusException(operationName, path, resolution.Status);
             }
 
             return (resolution.FileHandle, entryName);
+        }
+
+        internal static string[] SplitPath(string path, bool allowRootPath)
+        {
+            return NormalizePathComponents(path, allowRootPath);
         }
 
         internal static OpenNfsV3StatusException CreateStatusException(string operationName, string path, OpenNfsV3Status status)
@@ -140,7 +236,9 @@ namespace OpenNFS.Client
         private static string[] NormalizePathComponents(string path, bool allowRootPath)
         {
             string normalizedPath = OpenNfsClientArgument.RequireText(path, nameof(path)).Replace('\\', '/');
-            string[] components = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // Components are used verbatim: leading, trailing, and repeated spaces are legal in NFS names, so only the empty
+            // components produced by leading, trailing, or repeated separators are dropped.
+            string[] components = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
             if (components.Length == 0)
             {
@@ -165,16 +263,17 @@ namespace OpenNFS.Client
             return components;
         }
 
-        private async Task<(OpenNfsV3Status Status, byte[] FileHandle)> ResolvePathHandleAsync(
+        private async Task<OpenNfsMountSessionResolution> ResolvePathAsync(
             string[] pathComponents,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             byte[] currentHandle = _rootFileHandle.AsSpan().ToArray();
+            OpenNfsV3Attributes? currentAttributes = null;
             if (pathComponents.Length == 0)
             {
-                return (OpenNfsV3Status.Ok, currentHandle);
+                return new OpenNfsMountSessionResolution(OpenNfsV3Status.Ok, currentHandle, currentAttributes);
             }
 
             for (int index = 0; index < pathComponents.Length; index++)
@@ -184,13 +283,36 @@ namespace OpenNFS.Client
 
                 if (!lookupResult.IsSuccess || lookupResult.ObjectFileHandle.Length == 0)
                 {
-                    return (lookupResult.Status, Array.Empty<byte>());
+                    OpenNfsV3Status failureStatus = lookupResult.IsSuccess ? OpenNfsV3Status.ServerFault : lookupResult.Status;
+                    return new OpenNfsMountSessionResolution(failureStatus, Array.Empty<byte>(), null);
                 }
 
                 currentHandle = lookupResult.ObjectFileHandle.ToArray();
+                currentAttributes = lookupResult.ObjectAttributes;
             }
 
-            return (OpenNfsV3Status.Ok, currentHandle);
+            return new OpenNfsMountSessionResolution(OpenNfsV3Status.Ok, currentHandle, currentAttributes);
+        }
+
+        private async Task<OpenNfsMountSessionTransferSizes> LoadTransferSizesAsync()
+        {
+            bool datagramCapable = _client.Settings.TransportPolicy == OpenNfsClientTransportPolicy.TcpWithUdpFallbackForNfsV3;
+
+            try
+            {
+                OpenNfsV3FileSystemInfoResult fileSystemInfo =
+                    await _client.Files.GetFileSystemInfoV3Async(_rootFileHandle.AsSpan().ToArray(), _client.LifetimeCancellationToken).ConfigureAwait(false);
+                if (!fileSystemInfo.IsSuccess)
+                {
+                    return OpenNfsMountSessionTransferSizes.CreateDefault(datagramCapable);
+                }
+
+                return OpenNfsMountSessionTransferSizes.FromFileSystemInfo(fileSystemInfo, datagramCapable);
+            }
+            catch (OpenNfsClientException)
+            {
+                return OpenNfsMountSessionTransferSizes.CreateDefault(datagramCapable);
+            }
         }
     }
 }

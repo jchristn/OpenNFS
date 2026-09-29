@@ -271,7 +271,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 case (int)Nfs40Constants.FATTR4_MODE:
                     new fattr4_mode
                     {
-                        Value = CreateMode(resolvedHandle.PathInfo.Kind),
+                        Value = resolvedHandle.PathInfo.Mode.HasValue ? new mode4 { Value = resolvedHandle.PathInfo.Mode.Value } : CreateMode(resolvedHandle.PathInfo.Kind),
                     }.WriteTo(writer);
                     break;
                 case (int)Nfs40Constants.FATTR4_NO_TRUNC:

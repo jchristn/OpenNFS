@@ -166,21 +166,7 @@ namespace Test.Shared.Infrastructure
 
         private static async Task RemoveContainerAsync(string containerName)
         {
-            try
-            {
-                _ = await DockerCli.RunAsync(
-                    new List<string>
-                    {
-                        "rm",
-                        "--force",
-                        containerName,
-                    },
-                    CancellationToken.None,
-                    timeout: TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-            }
+            await DockerContainerCleanup.RemoveAsync(containerName).ConfigureAwait(false);
         }
 
         private static async Task WaitForTcpAsync(string host, int port, CancellationToken cancellationToken)

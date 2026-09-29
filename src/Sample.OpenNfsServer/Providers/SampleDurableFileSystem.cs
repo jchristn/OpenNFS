@@ -11,7 +11,7 @@ namespace Sample.OpenNfsServer.Providers
     using OpenNFS.Server.Responses;
     using Sample.OpenNfsServer.State;
 
-    internal sealed class SampleDurableFileSystem : INfsFileSystem, INfsLocking, INfsAcls, INfsDelegations, INfsIdMapper
+    internal sealed class SampleDurableFileSystem : INfsFileSystem, INfsLocking, INfsAcls, INfsDelegations, INfsIdMapper, INfsAttributeMutation
     {
         private readonly SamplePersistentAclStore _aclStore;
         private readonly SampleDelegationManager _delegationManager;
@@ -155,6 +155,11 @@ namespace Sample.OpenNfsServer.Providers
             return Task.FromResult(new NfsSetAclResponse(
                 NfsAclSupport.AllowAcl | NfsAclSupport.DenyAcl,
                 _aclStore.GetEntries(request.SourcePath)));
+        }
+
+        public Task<NfsSetAttributesResponse> SetAttributesAsync(NfsSetAttributesRequest request)
+        {
+            return _fileSystem.SetAttributesAsync(request);
         }
 
         public Task<NfsSetIdentityResponse> SetIdentityAsync(NfsSetIdentityRequest request)

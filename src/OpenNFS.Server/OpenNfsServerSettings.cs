@@ -57,6 +57,10 @@ namespace OpenNFS.Server
         /// <param name="copyClone">Optional copy and clone capability contract.</param>
         /// <param name="sparse">Optional sparse-file capability contract.</param>
         /// <param name="idMapper">Optional identity-mapping capability contract.</param>
+        /// <remarks>
+        /// When <paramref name="fileSystem"/> also implements <see cref="INfsAttributeMutation"/>, it is registered as the
+        /// attribute-mutation (SETATTR) capability automatically.
+        /// </remarks>
         /// <param name="rpcSecGssMechanism">Optional RPCSEC_GSS mechanism. When set, inbound calls
         /// arriving with <c>auth_flavor.RPCSEC_GSS</c> credentials are routed through this mechanism
         /// for context establishment, MIC verification, and (for the privacy service) Wrap / Unwrap.
@@ -115,16 +119,63 @@ namespace OpenNFS.Server
             MountAuthorization = mountAuthorization ?? AllowAllNfsMountAuthorization.Instance;
             FileHandleProvider = fileHandleProvider ?? FileHandles.IntrinsicHandleProvider.Default;
             Capabilities = new NfsServerCapabilities(
-                locking: locking,
-                acls: acls,
-                delegations: delegations,
-                copyClone: copyClone,
-                sparse: sparse,
-                idMapper: idMapper);
+                locking,
+                acls,
+                delegations,
+                copyClone,
+                sparse,
+                idMapper,
+                fileSystem as INfsAttributeMutation);
             RpcSecGssMechanism = rpcSecGssMechanism;
             RpcSecGssAuthenticator = new RpcSecGssAuthenticator(
                 contextStore: new RpcSecGssInMemoryContextStore(),
                 isMechanismRegistered: rpcSecGssMechanism is not null);
+        }
+
+        internal OpenNfsServerSettings(
+            INfsFileSystem fileSystem,
+            string serverName,
+            string listenerAddress,
+            int listenerPort,
+            bool enableUdpForNfsV3,
+            int maximumConnections,
+            INfsExportProvider? exportProvider,
+            INfsMountAuthorization? mountAuthorization,
+            IFileHandleProvider? fileHandleProvider,
+            INfsLocking? locking,
+            INfsAcls? acls,
+            INfsDelegations? delegations,
+            INfsCopyClone? copyClone,
+            INfsSparse? sparse,
+            INfsIdMapper? idMapper,
+            IRpcSecGssMechanism? rpcSecGssMechanism,
+            INfsAttributeMutation? attributeMutation)
+            : this(
+                fileSystem,
+                serverName,
+                listenerAddress,
+                listenerPort,
+                enableUdpForNfsV3,
+                maximumConnections,
+                exportProvider,
+                mountAuthorization,
+                fileHandleProvider,
+                locking,
+                acls,
+                delegations,
+                copyClone,
+                sparse,
+                idMapper,
+                rpcSecGssMechanism)
+        {
+            Capabilities = new NfsServerCapabilities(
+                locking,
+                acls,
+                delegations,
+                copyClone,
+                sparse,
+                idMapper,
+                attributeMutation);
         }
 
         /// <summary>

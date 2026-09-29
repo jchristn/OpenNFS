@@ -28,6 +28,22 @@ namespace OpenNFS.Client.Internal
             return value.AsSpan().ToArray();
         }
 
+        /// <summary>
+        /// Validates a single directory-entry name. Names are passed verbatim (leading, trailing, and repeated spaces are kept);
+        /// only null, empty, and whitespace-only names are rejected.
+        /// </summary>
+        internal static string RequireEntryName(string? value, string parameterName)
+        {
+            ArgumentNullException.ThrowIfNull(value, parameterName);
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new ArgumentException("The entry name cannot be empty or whitespace-only.", parameterName);
+            }
+
+            return value;
+        }
+
         internal static string RequireText(string? value, string parameterName, bool allowEmpty = false)
         {
             ArgumentNullException.ThrowIfNull(value);

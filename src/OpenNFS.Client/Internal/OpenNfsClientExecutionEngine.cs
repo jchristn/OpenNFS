@@ -95,6 +95,10 @@ namespace OpenNFS.Client.Internal
                     cancellationToken).ConfigureAwait(false);
                 return RpcMessageCodec.Encode(replyEnvelope);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception exception) when (exception is not OpenNfsClientException)
             {
                 throw TranslateExecutionException(operationName, exception);
@@ -150,6 +154,10 @@ namespace OpenNFS.Client.Internal
                     (attempt, replyEnvelope) => OpenNfsRpcReplyDecoder.ValidateReplyEnvelope(replyEnvelope, xid, operationName),
                     cancellationToken).ConfigureAwait(false);
                 return RpcMessageCodec.Encode(replyEnvelope);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception exception) when (exception is not OpenNfsClientException)
             {

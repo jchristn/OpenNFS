@@ -25,7 +25,7 @@ namespace OpenNFS.Client.Internal
             }
 
             string safeOwner = OpenNfsClientArgument.RequireText(openOwner, nameof(openOwner));
-            string safeEntryName = OpenNfsClientArgument.RequireText(entryName, nameof(entryName));
+            string safeEntryName = OpenNfsClientArgument.RequireEntryName(entryName, nameof(entryName));
             return new OPEN4args
             {
                 seqid = CreateSequenceId(sequenceId, nameof(sequenceId)),

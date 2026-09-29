@@ -34,5 +34,10 @@ namespace OpenNFS.Server
         /// Identity-mapping capability.
         /// </summary>
         IdMapping = 5,
+
+        /// <summary>
+        /// Attribute-mutation capability (size, timestamps, mode, and numeric ownership changes through SETATTR).
+        /// </summary>
+        AttributeMutation = 6,
     }
 }

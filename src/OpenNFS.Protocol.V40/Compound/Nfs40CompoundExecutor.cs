@@ -301,6 +301,21 @@ namespace OpenNFS.Protocol.V40.Compound
                 });
         }
 
+        private static nfsstat4 MapAttributeMutationException(Exception exception)
+        {
+            return exception switch
+            {
+                UnauthorizedAccessException => nfsstat4.NFS4ERR_ACCESS,
+                System.IO.FileNotFoundException => nfsstat4.NFS4ERR_STALE,
+                System.IO.DirectoryNotFoundException => nfsstat4.NFS4ERR_STALE,
+                System.IO.IOException => nfsstat4.NFS4ERR_IO,
+                NotSupportedException => nfsstat4.NFS4ERR_NOTSUPP,
+                OverflowException => nfsstat4.NFS4ERR_FBIG,
+                ArgumentException => nfsstat4.NFS4ERR_INVAL,
+                _ => nfsstat4.NFS4ERR_SERVERFAULT,
+            };
+        }
+
         private static Nfs40CompoundOperationResult CreateSetAttrResult(nfsstat4 status, bitmap4? attributesSet = null)
         {
             return new Nfs40CompoundOperationResult(
@@ -1262,13 +1277,66 @@ namespace OpenNFS.Protocol.V40.Compound
                 arguments.obj_attributes,
                 includeIdentityAttributes: _server.Capabilities.IdMapper is not null,
                 includeAclAttributes: _server.Capabilities.Acls is not null,
+                includeMutationAttributes: _server.Capabilities.AttributeMutation is not null,
                 out Nfs40SetAttributeUpdate? update,
                 out nfsstat4 decodeStatus))
             {
                 return CreateSetAttrResult(decodeStatus);
             }
 
+            if (update!.Size.HasValue && refreshedHandle.PathInfo.Kind != NfsPathKind.File)
+            {
+                return CreateSetAttrResult(
+                    refreshedHandle.PathInfo.Kind == NfsPathKind.Directory
+                        ? nfsstat4.NFS4ERR_ISDIR
+                        : nfsstat4.NFS4ERR_INVAL);
+            }
+
             List<int> updatedAttributeIds = new List<int>();
+            if (update.HasAttributeMutation)
+            {
+                try
+                {
+                    await _server.Capabilities.AttributeMutation!.SetAttributesAsync(
+                        new NfsSetAttributesRequest(
+                            refreshedHandle.Target.SourcePath,
+                            refreshedHandle.PathInfo.Kind,
+                            size: update.Size,
+                            mode: update.Mode,
+                            accessTimeUtc: update.AccessTimeUtc,
+                            modificationTimeUtc: update.ModificationTimeUtc,
+                            cancellationToken: cancellationToken)).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    return CreateSetAttrResult(MapAttributeMutationException(exception));
+                }
+
+                if (update.Size.HasValue)
+                {
+                    updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_SIZE);
+                }
+
+                if (update.Mode.HasValue)
+                {
+                    updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_MODE);
+                }
+
+                if (update.AccessTimeUtc.HasValue)
+                {
+                    updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_TIME_ACCESS_SET);
+                }
+
+                if (update.ModificationTimeUtc.HasValue)
+                {
+                    updatedAttributeIds.Add((int)Nfs40Constants.FATTR4_TIME_MODIFY_SET);
+                }
+            }
+
             try
             {
                 if (update!.HasAclUpdate)
@@ -1990,6 +2058,7 @@ namespace OpenNFS.Protocol.V40.Compound
             NfsPathInfo afterChangePathInfo = beforeChangePathInfo;
             Nfs40CompoundResolvedHandle? openedHandle = null;
             string fileKey;
+            int[] appliedCreateAttributeIds = Array.Empty<int>();
 
             switch (claimType.Value)
             {
@@ -2088,9 +2157,20 @@ namespace OpenNFS.Protocol.V40.Compound
                                 return CreateOpenResult(nfsstat4.NFS4ERR_BADXDR);
                             }
 
+                            Nfs40SetAttributeUpdate? createAttributes = null;
                             if (HasRequestedAttributes(createHow.createattrs))
                             {
-                                return CreateOpenResult(nfsstat4.NFS4ERR_ATTRNOTSUPP);
+                                if (_server.Capabilities.AttributeMutation is null
+                                    || !Nfs40AttributeEncoder.TryReadSettableAttributes(
+                                        createHow.createattrs,
+                                        includeIdentityAttributes: false,
+                                        includeAclAttributes: false,
+                                        includeMutationAttributes: true,
+                                        out createAttributes,
+                                        out _))
+                                {
+                                    return CreateOpenResult(nfsstat4.NFS4ERR_ATTRNOTSUPP);
+                                }
                             }
 
                             NfsPathInfo childPathInfo =
@@ -2120,6 +2200,19 @@ namespace OpenNFS.Protocol.V40.Compound
                                 openedHandle = await CreateResolvedHandleAsync(
                                     new NfsFileHandleTarget(refreshedHandle.Target.ExportPath, childPathInfo.Path),
                                     cancellationToken).ConfigureAwait(false);
+
+                                if (createAttributes is not null)
+                                {
+                                    (nfsstat4 existingAttributeStatus, int[] existingAttributeIds) =
+                                        await ApplyCreateAttributesAsync(openedHandle, createAttributes, existingFile: true, cancellationToken).ConfigureAwait(false);
+                                    if (existingAttributeStatus != nfsstat4.NFS4_OK)
+                                    {
+                                        return CreateOpenResult(existingAttributeStatus);
+                                    }
+
+                                    appliedCreateAttributeIds = existingAttributeIds;
+                                }
+
                                 break;
                             }
 
@@ -2159,6 +2252,19 @@ namespace OpenNFS.Protocol.V40.Compound
                                         refreshedHandle.Target.ExportPath,
                                         createResponse.PathInfo.Path),
                                     cancellationToken).ConfigureAwait(false);
+
+                                if (createAttributes is not null)
+                                {
+                                    (nfsstat4 createdAttributeStatus, int[] createdAttributeIds) =
+                                        await ApplyCreateAttributesAsync(openedHandle, createAttributes, existingFile: false, cancellationToken).ConfigureAwait(false);
+                                    if (createdAttributeStatus != nfsstat4.NFS4_OK)
+                                    {
+                                        return CreateOpenResult(createdAttributeStatus);
+                                    }
+
+                                    appliedCreateAttributeIds = createdAttributeIds;
+                                }
+
                                 afterChangePathInfo =
                                     await GetPathInfoAsync(refreshedHandle.Target.SourcePath, cancellationToken).ConfigureAwait(false);
                             }
@@ -2321,7 +2427,9 @@ namespace OpenNFS.Protocol.V40.Compound
                     rflags = transition.RequiresConfirmation
                         ? (uint)Nfs40Constants.OPEN4_RESULT_CONFIRM
                         : 0U,
-                    attrset = Nfs40MutationSupport.CreateEmptyAttributeSet(),
+                    attrset = appliedCreateAttributeIds.Length == 0
+                        ? Nfs40MutationSupport.CreateEmptyAttributeSet()
+                        : Nfs40AttributeEncoder.CreateBitmap(appliedCreateAttributeIds),
                     delegation = delegation,
                 });
         }
@@ -3464,6 +3572,67 @@ namespace OpenNFS.Protocol.V40.Compound
                     flavor = (uint)auth_flavor.AUTH_SYS,
                 },
             };
+        }
+
+        private async Task<(nfsstat4 Status, int[] AppliedAttributeIds)> ApplyCreateAttributesAsync(
+            Nfs40CompoundResolvedHandle openedHandle,
+            Nfs40SetAttributeUpdate update,
+            bool existingFile,
+            CancellationToken cancellationToken)
+        {
+            ulong? size = update.Size;
+            uint? mode = existingFile ? null : update.Mode;
+            DateTimeOffset? accessTimeUtc = existingFile ? null : update.AccessTimeUtc;
+            DateTimeOffset? modificationTimeUtc = existingFile ? null : update.ModificationTimeUtc;
+
+            if (!size.HasValue && !mode.HasValue && !accessTimeUtc.HasValue && !modificationTimeUtc.HasValue)
+            {
+                return (nfsstat4.NFS4_OK, Array.Empty<int>());
+            }
+
+            try
+            {
+                await _server.Capabilities.AttributeMutation!.SetAttributesAsync(
+                    new NfsSetAttributesRequest(
+                        openedHandle.Target.SourcePath,
+                        openedHandle.PathInfo.Kind,
+                        size: size,
+                        mode: mode,
+                        accessTimeUtc: accessTimeUtc,
+                        modificationTimeUtc: modificationTimeUtc,
+                        cancellationToken: cancellationToken)).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                return (MapAttributeMutationException(exception), Array.Empty<int>());
+            }
+
+            List<int> applied = new List<int>();
+            if (size.HasValue)
+            {
+                applied.Add((int)Nfs40Constants.FATTR4_SIZE);
+            }
+
+            if (mode.HasValue)
+            {
+                applied.Add((int)Nfs40Constants.FATTR4_MODE);
+            }
+
+            if (accessTimeUtc.HasValue)
+            {
+                applied.Add((int)Nfs40Constants.FATTR4_TIME_ACCESS_SET);
+            }
+
+            if (modificationTimeUtc.HasValue)
+            {
+                applied.Add((int)Nfs40Constants.FATTR4_TIME_MODIFY_SET);
+            }
+
+            return (nfsstat4.NFS4_OK, applied.ToArray());
         }
 
         private static bool HasRequestedAttributes(fattr4? attributes)

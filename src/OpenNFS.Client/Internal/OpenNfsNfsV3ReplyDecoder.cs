@@ -24,6 +24,23 @@ namespace OpenNFS.Client.Internal
                 MapRequiredAttributes(resok.obj_attributes, "GETATTR3res.resok.obj_attributes"));
         }
 
+        internal static OpenNfsV3SetAttributesResult ReadSetAttributesResult(ReadOnlyMemory<byte> encodedReply)
+        {
+            SETATTR3res result = DecodePayload(encodedReply, "NFSv3 SETATTR", SETATTR3res.ReadFrom);
+            OpenNfsV3Status status = MapStatus(ReadRequiredStatus(result.status, "NFSv3 SETATTR"));
+
+            if (status != OpenNfsV3Status.Ok)
+            {
+                SETATTR3resfail resfail = result.resfail
+                    ?? throw new InvalidDataException("The failed NFSv3 SETATTR result omitted the resfail arm.");
+                return new OpenNfsV3SetAttributesResult(status, MapWeakCacheConsistency(resfail.obj_wcc));
+            }
+
+            SETATTR3resok resok = result.resok
+                ?? throw new InvalidDataException("The successful NFSv3 SETATTR result omitted the resok arm.");
+            return new OpenNfsV3SetAttributesResult(status, MapWeakCacheConsistency(resok.obj_wcc));
+        }
+
         internal static OpenNfsV3AccessResult ReadAccessResult(ReadOnlyMemory<byte> encodedReply)
         {
             ACCESS3res result = DecodePayload(encodedReply, "NFSv3 ACCESS", ACCESS3res.ReadFrom);

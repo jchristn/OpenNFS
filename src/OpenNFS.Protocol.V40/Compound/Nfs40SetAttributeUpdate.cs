@@ -12,12 +12,36 @@ namespace OpenNFS.Protocol.V40.Compound
         internal Nfs40SetAttributeUpdate(
             IReadOnlyList<NfsAclEntry>? aclEntries,
             string? owner,
-            string? ownerGroup)
+            string? ownerGroup,
+            ulong? size = null,
+            uint? mode = null,
+            DateTimeOffset? accessTimeUtc = null,
+            DateTimeOffset? modificationTimeUtc = null)
         {
             _hasAclUpdate = aclEntries is not null;
             _aclEntries = CopyEntries(aclEntries);
             Owner = owner;
             OwnerGroup = ownerGroup;
+            Size = size;
+            Mode = mode;
+            AccessTimeUtc = accessTimeUtc;
+            ModificationTimeUtc = modificationTimeUtc;
+        }
+
+        internal ulong? Size { get; }
+
+        internal uint? Mode { get; }
+
+        internal DateTimeOffset? AccessTimeUtc { get; }
+
+        internal DateTimeOffset? ModificationTimeUtc { get; }
+
+        internal bool HasAttributeMutation
+        {
+            get
+            {
+                return Size.HasValue || Mode.HasValue || AccessTimeUtc.HasValue || ModificationTimeUtc.HasValue;
+            }
         }
 
         internal IReadOnlyList<NfsAclEntry> AclEntries

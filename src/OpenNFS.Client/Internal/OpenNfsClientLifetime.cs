@@ -8,7 +8,7 @@ namespace OpenNFS.Client.Internal
     {
         private readonly CancellationTokenSource _lifetimeCancellationTokenSource = new CancellationTokenSource();
         private readonly object _syncRoot = new object();
-        private int _nextXid = Environment.TickCount;
+        private int _nextXid = OpenNfsClientXidSeed.Create();
         private OpenNfsClientState _state = OpenNfsClientState.Created;
 
         internal CancellationToken LifetimeCancellationToken

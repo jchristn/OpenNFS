@@ -8,10 +8,27 @@ namespace OpenNFS.Client.Internal
     using OpenNFS.Rpc.RpcMessages;
     using OpenNFS.Rpc.Transport;
 
-    internal sealed class OpenNfsNetworkRpcExecutor : IOpenNfsRpcExecutor
+    internal sealed class OpenNfsNetworkRpcExecutor : IOpenNfsRpcExecutor, IAsyncDisposable
     {
-        private readonly OpenNfsTcpRpcExecutor _tcpRpcExecutor = new OpenNfsTcpRpcExecutor();
+        private readonly OpenNfsTcpRpcExecutor _tcpRpcExecutor;
         private readonly OpenNfsUdpRpcExecutor _udpRpcExecutor = new OpenNfsUdpRpcExecutor();
+
+        internal OpenNfsNetworkRpcExecutor()
+            : this(OpenNfsTcpRpcExecutor.DefaultMaxConnectionsPerEndpoint, OpenNfsTcpRpcExecutor.DefaultIdleConnectionTimeout)
+        {
+        }
+
+        internal OpenNfsNetworkRpcExecutor(int maxConnectionsPerEndpoint, TimeSpan idleConnectionTimeout)
+        {
+            _tcpRpcExecutor = new OpenNfsTcpRpcExecutor(maxConnectionsPerEndpoint, idleConnectionTimeout);
+        }
+
+        internal OpenNfsRpcConnectionPool TcpPool => _tcpRpcExecutor.Pool;
+
+        public ValueTask DisposeAsync()
+        {
+            return _tcpRpcExecutor.DisposeAsync();
+        }
 
         public async Task<RpcMessageEnvelope> ExecuteAsync(
             OpenNfsRpcExecutionRequest request,

@@ -38,6 +38,35 @@ namespace OpenNFS.Server
         }
 
         /// <summary>
+        /// Initializes a new instance of the <see cref="NfsServerCapabilities"/> class including the attribute-mutation capability.
+        /// </summary>
+        /// <param name="locking">Optional locking capability contract.</param>
+        /// <param name="acls">Optional ACL capability contract.</param>
+        /// <param name="delegations">Optional delegations capability contract.</param>
+        /// <param name="copyClone">Optional copy and clone capability contract.</param>
+        /// <param name="sparse">Optional sparse-file capability contract.</param>
+        /// <param name="idMapper">Optional identity-mapping capability contract.</param>
+        /// <param name="attributeMutation">Optional attribute-mutation (SETATTR) capability contract.</param>
+        public NfsServerCapabilities(
+            INfsLocking? locking,
+            INfsAcls? acls,
+            INfsDelegations? delegations,
+            INfsCopyClone? copyClone,
+            INfsSparse? sparse,
+            INfsIdMapper? idMapper,
+            INfsAttributeMutation? attributeMutation)
+        {
+            Locking = locking;
+            Acls = acls;
+            Delegations = delegations;
+            CopyClone = copyClone;
+            Sparse = sparse;
+            IdMapper = idMapper;
+            AttributeMutation = attributeMutation;
+            _AdvertisedCapabilities = BuildAdvertisedCapabilities();
+        }
+
+        /// <summary>
         /// Gets the configured locking capability contract, if one is available.
         /// </summary>
         public INfsLocking? Locking { get; }
@@ -68,6 +97,11 @@ namespace OpenNFS.Server
         public INfsIdMapper? IdMapper { get; }
 
         /// <summary>
+        /// Gets the configured attribute-mutation (SETATTR size, timestamps, and mode) capability contract, if one is available.
+        /// </summary>
+        public INfsAttributeMutation? AttributeMutation { get; }
+
+        /// <summary>
         /// Gets the ordered list of advertised optional capabilities.
         /// </summary>
         public IReadOnlyList<NfsCapabilityKind> AdvertisedCapabilities
@@ -94,6 +128,7 @@ namespace OpenNFS.Server
                 NfsCapabilityKind.CopyClone => CopyClone is not null,
                 NfsCapabilityKind.SparseFiles => Sparse is not null,
                 NfsCapabilityKind.IdMapping => IdMapper is not null,
+                NfsCapabilityKind.AttributeMutation => AttributeMutation is not null,
                 _ => throw new ArgumentOutOfRangeException(nameof(capabilityKind), capabilityKind, "The requested capability kind is not defined."),
             };
         }
@@ -130,6 +165,11 @@ namespace OpenNFS.Server
             if (IdMapper is not null)
             {
                 advertisedCapabilities.Add(NfsCapabilityKind.IdMapping);
+            }
+
+            if (AttributeMutation is not null)
+            {
+                advertisedCapabilities.Add(NfsCapabilityKind.AttributeMutation);
             }
 
             return advertisedCapabilities.ToArray();

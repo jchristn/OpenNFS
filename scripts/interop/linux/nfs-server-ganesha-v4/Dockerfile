@@ -6,6 +6,7 @@ RUN apt-get update \
 
 COPY entrypoint.sh /usr/local/bin/opennfs-ganesha-entrypoint.sh
 COPY ganesha.conf /etc/ganesha/ganesha.conf
+COPY ganesha-v3.conf /etc/ganesha/ganesha-v3.conf
 RUN chmod +x /usr/local/bin/opennfs-ganesha-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/opennfs-ganesha-entrypoint.sh"]

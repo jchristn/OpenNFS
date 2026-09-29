@@ -344,19 +344,36 @@
                         {
                             while (!serverCancellationSource.IsCancellationRequested)
                             {
-                                using TcpClient acceptedClient = await listener.AcceptTcpClientAsync(serverCancellationSource.Token).ConfigureAwait(false);
-                                Interlocked.Increment(ref actualCallCount);
-                                using NetworkStream stream = acceptedClient.GetStream();
-                                RpcTcpTransport transport = new RpcTcpTransport(
-                                    stream,
-                                    new RpcTransportOptions(
-                                        timeouts: new RpcTransportTimeouts(
-                                            readTimeout: TimeSpan.FromSeconds(5),
-                                            writeTimeout: TimeSpan.FromSeconds(5))));
+                                TcpClient acceptedClient = await listener.AcceptTcpClientAsync(serverCancellationSource.Token).ConfigureAwait(false);
+                                _ = Task.Run(
+                                    async () =>
+                                    {
+                                        using (acceptedClient)
+                                        using (NetworkStream stream = acceptedClient.GetStream())
+                                        {
+                                            RpcTcpTransport transport = new RpcTcpTransport(
+                                                stream,
+                                                new RpcTransportOptions(
+                                                    timeouts: new RpcTransportTimeouts(
+                                                        readTimeout: TimeSpan.FromSeconds(30),
+                                                        writeTimeout: TimeSpan.FromSeconds(5))));
 
-                                RpcMessageEnvelope request = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
-                                RpcMessageEnvelope reply = await service.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
-                                await transport.SendAsync(reply, cancellationToken).ConfigureAwait(false);
+                                            try
+                                            {
+                                                while (!serverCancellationSource.IsCancellationRequested)
+                                                {
+                                                    RpcMessageEnvelope request = await transport.ReceiveAsync(serverCancellationSource.Token).ConfigureAwait(false);
+                                                    Interlocked.Increment(ref actualCallCount);
+                                                    RpcMessageEnvelope reply = await service.DispatchAsync(request, cancellationToken).ConfigureAwait(false);
+                                                    await transport.SendAsync(reply, cancellationToken).ConfigureAwait(false);
+                                                }
+                                            }
+                                            catch (Exception)
+                                            {
+                                            }
+                                        }
+                                    },
+                                    CancellationToken.None);
                             }
                         }
                         catch (OperationCanceledException) when (serverCancellationSource.IsCancellationRequested)

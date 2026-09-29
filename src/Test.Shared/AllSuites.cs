@@ -40,7 +40,9 @@ namespace Test.Shared
                     SampleServerSuites.Create(),
                     ClientSurfaceSuites.Create(),
                     ClientRawSuites.Create(),
-                    ClientGroupedSuites.Create()
+                    ClientGroupedSuites.Create(),
+                    MountSessionSuites.Create(),
+                    InteropMountSessionSuites.Create()
                 };
             }
         }

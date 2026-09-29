@@ -17,4 +17,4 @@ chmod -R 0777 /export-real
 mkdir -p /run/dbus /var/run/ganesha /var/lib/nfs/ganesha
 dbus-daemon --system --fork
 rpcbind -w
-exec ganesha.nfsd -F -L /dev/stderr -f /etc/ganesha/ganesha.conf
+exec ganesha.nfsd -F -L /dev/stderr -f "${GANESHA_CONFIG:-/etc/ganesha/ganesha.conf}"

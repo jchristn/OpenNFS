@@ -27,7 +27,9 @@ namespace OpenNFS.Client
         private readonly object _SyncRoot = new object();
         private readonly OpenNfsTransportPipeline _TransportPipeline;
         private readonly OpenNfsV42GroupedSessionSupport _V42GroupedSessionSupport;
-        private int _NextXid = Environment.TickCount;
+        private readonly SemaphoreSlim _PortmapperGate = new SemaphoreSlim(1, 1);
+        private OpenNfsPortmapperDiscovery? _PortmapperDiscovery;
+        private int _NextXid = OpenNfsClientXidSeed.Create();
         private OpenNfsClientState _State = OpenNfsClientState.Created;
 
         /// <summary>
@@ -36,9 +38,11 @@ namespace OpenNFS.Client
         /// <param name="settings">Validated client settings.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="settings"/> is null.</exception>
         public OpenNfsClient(OpenNfsClientSettings settings)
-            : this(settings, new OpenNfsNetworkRpcExecutor(), transportPipeline: null)
+            : this(settings, CreateNetworkExecutor(settings), transportPipeline: null)
         {
         }
+
+        internal IOpenNfsRpcExecutor RpcExecutor => _RpcExecutor;
 
         internal OpenNfsClient(
             OpenNfsClientSettings settings,
@@ -133,6 +137,31 @@ namespace OpenNFS.Client
         }
 
         /// <summary>
+        /// Gets the MOUNT v3 endpoint discovered through the server's portmapper, or <c>null</c> when portmapper discovery is disabled,
+        /// has not run yet, was skipped because a mount endpoint was configured explicitly, or did not find a registration.
+        /// Discovery runs during <see cref="ConnectAsync(CancellationToken)"/> when <see cref="OpenNfsClientSettings.EnablePortmapperDiscovery"/> is <c>true</c>.
+        /// </summary>
+        public OpenNfsEndpoint? DiscoveredMountEndpoint
+        {
+            get
+            {
+                return Volatile.Read(ref _PortmapperDiscovery)?.MountEndpoint;
+            }
+        }
+
+        /// <summary>
+        /// Gets the NFSv3 endpoint discovered through the server's portmapper, or <c>null</c> when portmapper discovery is disabled,
+        /// has not run yet, was skipped because the NFS port was configured explicitly, or did not find a registration.
+        /// </summary>
+        public OpenNfsEndpoint? DiscoveredNfsEndpoint
+        {
+            get
+            {
+                return Volatile.Read(ref _PortmapperDiscovery)?.NfsEndpoint;
+            }
+        }
+
+        /// <summary>
         /// Gets the lifetime cancellation token associated with this client wrapper.
         /// </summary>
         public CancellationToken LifetimeCancellationToken
@@ -181,12 +210,16 @@ namespace OpenNFS.Client
         /// Opens the client lifetime for future network activity.
         /// This method does not perform eager server reachability probes, version negotiation, or mount bootstrap traffic.
         /// Those protocol-specific steps occur when the first real client operation is issued.
+        /// When <see cref="OpenNfsClientSettings.EnablePortmapperDiscovery"/> is <c>true</c>, this method also queries the server's
+        /// portmapper for the MOUNT v3 port (and the NFSv3 port when it was not set explicitly); portmapper failures are not thrown
+        /// here and the client falls back to its configured endpoints.
         /// </summary>
         /// <param name="cancellationToken">Cancellation token for the connect operation.</param>
         /// <returns>A task that completes when the client lifetime has been opened.</returns>
-        public Task ConnectAsync(CancellationToken cancellationToken)
+        public async Task ConnectAsync(CancellationToken cancellationToken)
         {
-            return OpenAsync(cancellationToken);
+            await OpenAsync(cancellationToken).ConfigureAwait(false);
+            await EnsurePortmapperDiscoveryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -229,6 +262,10 @@ namespace OpenNFS.Client
             if (shouldCancelLifetime)
             {
                 _LifetimeCancellationTokenSource.Cancel();
+                if (_RpcExecutor is IAsyncDisposable closableExecutor)
+                {
+                    return closableExecutor.DisposeAsync().AsTask();
+                }
             }
 
             return Task.CompletedTask;
@@ -315,7 +352,7 @@ namespace OpenNFS.Client
                 throw new OpenNfsMountV3StatusException(safeExportPath, mountResult.Status);
             }
 
-            return CreateMountSession(safeExportPath, mountResult);
+            return new OpenNfsMountSession(this, safeExportPath, mountResult.RootFileHandle.ToArray(), ownsMount: true);
         }
 
         /// <summary>
@@ -409,6 +446,11 @@ namespace OpenNFS.Client
             {
                 await _V42GroupedSessionSupport.DisposeAsync().ConfigureAwait(false);
                 _LifetimeCancellationTokenSource.Cancel();
+                if (_RpcExecutor is IAsyncDisposable disposableExecutor)
+                {
+                    await disposableExecutor.DisposeAsync().ConfigureAwait(false);
+                }
+
                 _LifetimeCancellationTokenSource.Dispose();
             }
         }
@@ -430,6 +472,12 @@ namespace OpenNFS.Client
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfOperationUnavailable();
 
+            OpenNfsEndpoint? discoveredNfsEndpoint = Volatile.Read(ref _PortmapperDiscovery)?.NfsEndpoint;
+            IReadOnlyCollection<OpenNfsEndpoint> candidateEndpoints =
+                discoveredNfsEndpoint is not null && request.ProgramNumber == OpenNfsV3RpcConstants.NfsProgram
+                    ? new OpenNfsEndpoint[] { discoveredNfsEndpoint }
+                    : Settings.CandidateEndpoints;
+
             return Task.FromResult(new OpenNfsV3ProcedurePlan(
                 programNumber: request.ProgramNumber,
                 versionNumber: request.VersionNumber,
@@ -438,7 +486,7 @@ namespace OpenNFS.Client
                 transportPolicy: Settings.TransportPolicy,
                 authenticationFlavor: Settings.AuthenticationFlavor,
                 retryMode: request.RetryMode,
-                candidateEndpoints: Settings.CandidateEndpoints,
+                candidateEndpoints: candidateEndpoints,
                 retryPlan: BuildRetryPlan(request.RetryMode)));
         }
 
@@ -448,9 +496,12 @@ namespace OpenNFS.Client
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfOperationUnavailable();
 
-            IReadOnlyCollection<OpenNfsEndpoint> candidateEndpoints = HasDedicatedMountEndpoint()
-                ? new OpenNfsEndpoint[] { Settings.MountEndpoint }
-                : Settings.CandidateEndpoints;
+            OpenNfsEndpoint? discoveredMountEndpoint = Volatile.Read(ref _PortmapperDiscovery)?.MountEndpoint;
+            IReadOnlyCollection<OpenNfsEndpoint> candidateEndpoints = discoveredMountEndpoint is not null
+                ? new OpenNfsEndpoint[] { discoveredMountEndpoint }
+                : HasDedicatedMountEndpoint()
+                    ? new OpenNfsEndpoint[] { Settings.MountEndpoint }
+                    : Settings.CandidateEndpoints;
 
             return Task.FromResult(new OpenNfsV3ProcedurePlan(
                 programNumber: request.ProgramNumber,
@@ -641,12 +692,19 @@ namespace OpenNFS.Client
         {
             ArgumentNullException.ThrowIfNull(validateReply);
 
-            ReadOnlyMemory<byte> encodedReply = await ExecuteMountV3ProcedureAsync(
-                request,
-                operationName,
-                idempotency,
-                cancellationToken).ConfigureAwait(false);
-            ValidateResult(encodedReply, operationName, validateReply);
+            try
+            {
+                ReadOnlyMemory<byte> encodedReply = await ExecuteMountV3ProcedureAsync(
+                    request,
+                    operationName,
+                    idempotency,
+                    cancellationToken).ConfigureAwait(false);
+                ValidateResult(encodedReply, operationName, validateReply);
+            }
+            catch (OpenNfsClientException exception) when (TryCreateMountDiscoveryFallbackException(operationName, exception, out OpenNfsClientException? wrapped))
+            {
+                throw wrapped!;
+            }
         }
 
         internal async Task<TResult> ExecuteMountV3ProcedureAsync<TResult>(
@@ -658,12 +716,19 @@ namespace OpenNFS.Client
         {
             ArgumentNullException.ThrowIfNull(decodeReply);
 
-            ReadOnlyMemory<byte> encodedReply = await ExecuteMountV3ProcedureAsync(
-                request,
-                operationName,
-                idempotency,
-                cancellationToken).ConfigureAwait(false);
-            return DecodeResult(encodedReply, operationName, decodeReply);
+            try
+            {
+                ReadOnlyMemory<byte> encodedReply = await ExecuteMountV3ProcedureAsync(
+                    request,
+                    operationName,
+                    idempotency,
+                    cancellationToken).ConfigureAwait(false);
+                return DecodeResult(encodedReply, operationName, decodeReply);
+            }
+            catch (OpenNfsClientException exception) when (TryCreateMountDiscoveryFallbackException(operationName, exception, out OpenNfsClientException? wrapped))
+            {
+                throw wrapped!;
+            }
         }
 
         private void ThrowIfDisposed()
@@ -686,6 +751,12 @@ namespace OpenNFS.Client
                         "The client must be opened via ConnectAsync or OpenAsync before client operations can be issued.");
                 }
             }
+        }
+
+        private static IOpenNfsRpcExecutor CreateNetworkExecutor(OpenNfsClientSettings settings)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            return new OpenNfsNetworkRpcExecutor(settings.MaxConnectionsPerEndpoint, settings.IdleConnectionTimeout);
         }
 
         private static opaque_auth CreateAuthSysCredential(OpenNfsClientSettings settings, uint xid)
@@ -841,6 +912,7 @@ namespace OpenNFS.Client
             ArgumentNullException.ThrowIfNull(operationName);
             cancellationToken.ThrowIfCancellationRequested();
 
+            await EnsurePortmapperDiscoveryAsync(cancellationToken).ConfigureAwait(false);
             OpenNfsV3ProcedurePlan plan = await PrepareV3ProcedureAsync(request, cancellationToken).ConfigureAwait(false);
             return await ExecutePreparedV3ProcedureAsync(plan, operationName, idempotency, cancellationToken).ConfigureAwait(false);
         }
@@ -862,8 +934,145 @@ namespace OpenNFS.Client
             ArgumentNullException.ThrowIfNull(operationName);
             cancellationToken.ThrowIfCancellationRequested();
 
+            await EnsurePortmapperDiscoveryAsync(cancellationToken).ConfigureAwait(false);
             OpenNfsV3ProcedurePlan plan = await PrepareMountV3ProcedureAsync(request, cancellationToken).ConfigureAwait(false);
+
             return await ExecutePreparedV3ProcedureAsync(plan, operationName, idempotency, cancellationToken).ConfigureAwait(false);
+        }
+
+        private bool TryCreateMountDiscoveryFallbackException(
+            string operationName,
+            OpenNfsClientException exception,
+            out OpenNfsClientException? wrapped)
+        {
+            wrapped = null;
+            OpenNfsPortmapperDiscovery? discovery = Volatile.Read(ref _PortmapperDiscovery);
+            if (discovery is null
+                || discovery.MountEndpoint is not null
+                || Settings.HasExplicitMountEndpoint
+                || exception is OpenNfsV3StatusException
+                || exception is OpenNfsMountV3StatusException
+                || exception is OpenNfsClientStateException)
+            {
+                return false;
+            }
+
+            OpenNfsEndpoint attemptedEndpoint = HasDedicatedMountEndpoint()
+                ? Settings.MountEndpoint
+                : Settings.CandidateEndpoints[0];
+            string message = operationName
+                + " failed against "
+                + attemptedEndpoint.Host
+                + ":"
+                + attemptedEndpoint.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ". Portmapper discovery at "
+                + Settings.ServerHost
+                + ":"
+                + Settings.PortmapperPort.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + " did not provide a MOUNT v3 port ("
+                + discovery.FailureReason
+                + "), so the client fell back to its configured endpoint. Configure the mount endpoint explicitly with "
+                + "OpenNfsClientBuilder.WithMountEndpoint or WithMountPort, or make the server's portmapper reachable. "
+                + exception.Message;
+
+            wrapped = exception is OpenNfsClientIoException
+                ? new OpenNfsClientIoException(message, exception)
+                : new OpenNfsClientProtocolException(
+                    message,
+                    operationName,
+                    exception.Category,
+                    exception is OpenNfsClientProtocolException protocolException && protocolException.IsRetryable,
+                    exception);
+            return true;
+        }
+
+        private async Task EnsurePortmapperDiscoveryAsync(CancellationToken cancellationToken)
+        {
+            if (!Settings.EnablePortmapperDiscovery || Volatile.Read(ref _PortmapperDiscovery) is not null)
+            {
+                return;
+            }
+
+            await _PortmapperGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (Volatile.Read(ref _PortmapperDiscovery) is not null)
+                {
+                    return;
+                }
+
+                OpenNfsEndpoint? mountEndpoint = null;
+                OpenNfsEndpoint? nfsEndpoint = null;
+                List<string> failures = new List<string>();
+
+                if (!Settings.HasExplicitMountEndpoint)
+                {
+                    mountEndpoint = await DiscoverEndpointAsync(
+                        (uint)OpenNfsV3RpcConstants.MountProgram,
+                        (uint)OpenNfsV3RpcConstants.MountVersion,
+                        "MOUNT v3",
+                        failures,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                if (!Settings.HasExplicitServerPort)
+                {
+                    nfsEndpoint = await DiscoverEndpointAsync(
+                        (uint)OpenNfsV3RpcConstants.NfsProgram,
+                        (uint)OpenNfsV3RpcConstants.NfsVersion,
+                        "NFSv3",
+                        failures,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                Volatile.Write(
+                    ref _PortmapperDiscovery,
+                    new OpenNfsPortmapperDiscovery(
+                        mountEndpoint,
+                        nfsEndpoint,
+                        failures.Count == 0 ? "no failure" : string.Join("; ", failures)));
+            }
+            finally
+            {
+                _PortmapperGate.Release();
+            }
+        }
+
+        private async Task<OpenNfsEndpoint?> DiscoverEndpointAsync(
+            uint program,
+            uint version,
+            string displayName,
+            List<string> failures,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                uint xid = unchecked((uint)System.Threading.Interlocked.Increment(ref _NextXid));
+                uint port = await OpenNfsPortmapperClient.GetPortAsync(
+                    _RpcExecutor,
+                    _TransportPipeline,
+                    Settings,
+                    xid,
+                    program,
+                    version,
+                    cancellationToken).ConfigureAwait(false);
+                if (port == 0)
+                {
+                    failures.Add(displayName + " over TCP is not registered with the portmapper (GETPORT returned 0)");
+                    return null;
+                }
+
+                return new OpenNfsEndpoint(Settings.ServerHost, (int)port);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failures.Add(displayName + " GETPORT failed: " + exception.Message);
+                return null;
+            }
         }
 
         private async Task<ReadOnlyMemory<byte>> ExecutePreparedV3ProcedureAsync(
@@ -908,6 +1117,10 @@ namespace OpenNFS.Client
                     (attempt, replyEnvelope) => OpenNfsRpcReplyDecoder.ValidateReplyEnvelope(replyEnvelope, xid, operationName),
                     cancellationToken).ConfigureAwait(false);
                 return RpcMessageCodec.Encode(replyEnvelope);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception exception) when (exception is not OpenNfsClientException)
             {
@@ -955,6 +1168,10 @@ namespace OpenNFS.Client
                     (attempt, replyEnvelope) => OpenNfsRpcReplyDecoder.ValidateReplyEnvelope(replyEnvelope, xid, operationName),
                     cancellationToken).ConfigureAwait(false);
                 return RpcMessageCodec.Encode(replyEnvelope);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception exception) when (exception is not OpenNfsClientException)
             {

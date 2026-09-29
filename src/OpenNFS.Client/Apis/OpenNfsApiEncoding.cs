@@ -138,7 +138,7 @@ namespace OpenNFS.Client.Apis
                 {
                     Value = new utf8string
                     {
-                        Value = Encoding.UTF8.GetBytes(OpenNfsClientArgument.RequireText(entryName, parameterName)),
+                        Value = Encoding.UTF8.GetBytes(OpenNfsClientArgument.RequireEntryName(entryName, parameterName)),
                     },
                 },
             };

@@ -157,6 +157,17 @@ namespace OpenNFS.Protocol.V40.Compound
                             cancellationToken)).ConfigureAwait(false);
             }
 
+            int[] advertisedAttributeIds = supportedAttributeIds;
+            if (server.Capabilities.AttributeMutation is not null)
+            {
+                List<int> withSettableTimes = new List<int>(supportedAttributeIds)
+                {
+                    (int)Nfs40Constants.FATTR4_TIME_ACCESS_SET,
+                    (int)Nfs40Constants.FATTR4_TIME_MODIFY_SET,
+                };
+                advertisedAttributeIds = withSettableTimes.ToArray();
+            }
+
             XdrWriter writer = new XdrWriter();
             for (int index = 0; index < requestedAttributeIds.Count; index++)
             {
@@ -164,7 +175,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     writer,
                     requestedAttributeIds[index],
                     resolvedHandle,
-                    supportedAttributeIds,
+                    advertisedAttributeIds,
                     identityResponse,
                     aclResponse);
             }
@@ -252,6 +263,23 @@ namespace OpenNFS.Protocol.V40.Compound
             out Nfs40SetAttributeUpdate? update,
             out nfsstat4 errorStatus)
         {
+            return TryReadSettableAttributes(
+                attributes,
+                includeIdentityAttributes,
+                includeAclAttributes,
+                includeMutationAttributes: false,
+                out update,
+                out errorStatus);
+        }
+
+        internal static bool TryReadSettableAttributes(
+            fattr4? attributes,
+            bool includeIdentityAttributes,
+            bool includeAclAttributes,
+            bool includeMutationAttributes,
+            out Nfs40SetAttributeUpdate? update,
+            out nfsstat4 errorStatus)
+        {
             update = null;
             if (attributes?.attrmask is null || attributes.attr_vals?.Value is null)
             {
@@ -270,6 +298,10 @@ namespace OpenNFS.Protocol.V40.Compound
             string? owner = null;
             string? ownerGroup = null;
             IReadOnlyList<NfsAclEntry>? aclEntries = null;
+            ulong? size = null;
+            uint? mode = null;
+            DateTimeOffset? accessTimeUtc = null;
+            DateTimeOffset? modificationTimeUtc = null;
 
             try
             {
@@ -278,6 +310,46 @@ namespace OpenNFS.Protocol.V40.Compound
                     int attributeId = requestedAttributeIds[index];
                     switch (attributeId)
                     {
+                        case (int)Nfs40Constants.FATTR4_SIZE:
+                            if (!includeMutationAttributes)
+                            {
+                                errorStatus = nfsstat4.NFS4ERR_ATTRNOTSUPP;
+                                return false;
+                            }
+
+                            size = fattr4_size.ReadFrom(reader).Value;
+                            break;
+
+                        case (int)Nfs40Constants.FATTR4_MODE:
+                            if (!includeMutationAttributes)
+                            {
+                                errorStatus = nfsstat4.NFS4ERR_ATTRNOTSUPP;
+                                return false;
+                            }
+
+                            mode = (fattr4_mode.ReadFrom(reader).Value?.Value ?? 0U) & 0xFFFU;
+                            break;
+
+                        case (int)Nfs40Constants.FATTR4_TIME_ACCESS_SET:
+                            if (!includeMutationAttributes)
+                            {
+                                errorStatus = nfsstat4.NFS4ERR_ATTRNOTSUPP;
+                                return false;
+                            }
+
+                            accessTimeUtc = ReadSetTime(fattr4_time_access_set.ReadFrom(reader).Value);
+                            break;
+
+                        case (int)Nfs40Constants.FATTR4_TIME_MODIFY_SET:
+                            if (!includeMutationAttributes)
+                            {
+                                errorStatus = nfsstat4.NFS4ERR_ATTRNOTSUPP;
+                                return false;
+                            }
+
+                            modificationTimeUtc = ReadSetTime(fattr4_time_modify_set.ReadFrom(reader).Value);
+                            break;
+
                         case (int)Nfs40Constants.FATTR4_ACL:
                             if (!includeAclAttributes)
                             {
@@ -319,8 +391,15 @@ namespace OpenNFS.Protocol.V40.Compound
                 }
 
                 reader.EnsureFullyConsumed();
-                update = new Nfs40SetAttributeUpdate(aclEntries, owner, ownerGroup);
-                if (!update.HasAclUpdate && !update.HasIdentityUpdate)
+                update = new Nfs40SetAttributeUpdate(
+                    aclEntries,
+                    owner,
+                    ownerGroup,
+                    size,
+                    mode,
+                    accessTimeUtc,
+                    modificationTimeUtc);
+                if (!update.HasAclUpdate && !update.HasIdentityUpdate && !update.HasAttributeMutation)
                 {
                     errorStatus = nfsstat4.NFS4ERR_INVAL;
                     update = null;
@@ -353,6 +432,33 @@ namespace OpenNFS.Protocol.V40.Compound
                 errorStatus = nfsstat4.NFS4ERR_BADXDR;
                 update = null;
                 return false;
+            }
+        }
+
+        private static DateTimeOffset ReadSetTime(settime4? value)
+        {
+            settime4 setTime = value
+                ?? throw new InvalidOperationException("The settime4 attribute value was missing.");
+            time_how4 how = setTime.set_it
+                ?? throw new InvalidOperationException("The settime4 discriminant was missing.");
+
+            switch (how)
+            {
+                case time_how4.SET_TO_SERVER_TIME4:
+                    return DateTimeOffset.UtcNow;
+
+                case time_how4.SET_TO_CLIENT_TIME4:
+                    nfstime4 time = setTime.time
+                        ?? throw new InvalidOperationException("The settime4 client time was missing.");
+                    if (time.nseconds > 999_999_999U)
+                    {
+                        throw new ArgumentOutOfRangeException(nameof(value), time.nseconds, "The nfstime4 nanoseconds value is out of range.");
+                    }
+
+                    return DateTimeOffset.FromUnixTimeSeconds(time.seconds).AddTicks(time.nseconds / 100U);
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), how, "The settime4 discriminant is not defined.");
             }
         }
 
@@ -953,7 +1059,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 case (int)Nfs40Constants.FATTR4_MODE:
                     new fattr4_mode
                     {
-                        Value = CreateMode(resolvedHandle.PathInfo.Kind),
+                        Value = resolvedHandle.PathInfo.Mode.HasValue ? new mode4 { Value = resolvedHandle.PathInfo.Mode.Value } : CreateMode(resolvedHandle.PathInfo.Kind),
                     }.WriteTo(writer);
                     break;
 

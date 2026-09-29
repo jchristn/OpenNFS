@@ -20,6 +20,7 @@ namespace OpenNFS.Server
     {
         private readonly List<OpenNfsExportDefinition> _ConfiguredExports = new List<OpenNfsExportDefinition>();
         private INfsAcls? _Acls;
+        private INfsAttributeMutation? _AttributeMutation;
         private INfsCopyClone? _CopyClone;
         private INfsDelegations? _Delegations;
         private INfsExportProvider? _ExportProvider;
@@ -243,6 +244,21 @@ namespace OpenNFS.Server
         }
 
         /// <summary>
+        /// Assigns the optional attribute-mutation capability contract used by NFSv3 <c>SETATTR</c> and NFSv4.0 <c>SETATTR</c>
+        /// for size (truncate or extend), timestamp, and mode changes.
+        /// A file system that implements <see cref="INfsAttributeMutation"/> is discovered automatically; this method overrides it.
+        /// </summary>
+        /// <param name="attributeMutation">Attribute-mutation capability contract.</param>
+        /// <returns>The current builder instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="attributeMutation"/> is null.</exception>
+        public OpenNfsServerBuilder UseAttributeMutation(INfsAttributeMutation attributeMutation)
+        {
+            ArgumentNullException.ThrowIfNull(attributeMutation);
+            _AttributeMutation = attributeMutation;
+            return this;
+        }
+
+        /// <summary>
         /// Assigns the optional identity-mapping capability contract.
         /// </summary>
         /// <param name="idMapper">Identity-mapping capability contract.</param>
@@ -355,7 +371,8 @@ namespace OpenNFS.Server
                 copyClone: ResolveCopyClone(),
                 sparse: ResolveSparse(),
                 idMapper: ResolveIdMapper(),
-                rpcSecGssMechanism: _RpcSecGssMechanism);
+                rpcSecGssMechanism: _RpcSecGssMechanism,
+                attributeMutation: ResolveAttributeMutation());
         }
 
         /// <summary>
@@ -446,6 +463,11 @@ namespace OpenNFS.Server
         private INfsIdMapper? ResolveIdMapper()
         {
             return _IdMapper ?? _FileSystem as INfsIdMapper;
+        }
+
+        private INfsAttributeMutation? ResolveAttributeMutation()
+        {
+            return _AttributeMutation ?? _FileSystem as INfsAttributeMutation;
         }
     }
 }

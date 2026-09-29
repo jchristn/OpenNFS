@@ -7,9 +7,19 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
     using OpenNFS.Protocol.V3.Generated;
     using OpenNFS.Rpc.Xdr;
     using OpenNFS.Server;
+    using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
 
+    /// <summary>
+    /// Handles NFSv3 <c>SETATTR</c> (RFC 1813 section 3.3.2).
+    /// </summary>
+    /// <remarks>
+    /// When the host registers <see cref="INfsAttributeMutation"/>, size, mode, numeric ownership, and timestamp changes are
+    /// routed through that seam. Hosts without the capability keep the legacy behavior: timestamp-only changes are applied to
+    /// the resolved host path directly, and every other change (including an empty change set) is rejected with
+    /// <c>NFS3ERR_NOTSUPP</c>.
+    /// </remarks>
     internal sealed class Nfs3SetAttrProcedureHandler : Nfs3ProcedureHandlerBase<SETATTR3args, SETATTR3res>
     {
         private readonly OpenNfsServer _server;
@@ -43,11 +53,6 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 return CreateFailureResult(nfsstat3.NFS3ERR_NOT_SYNC, currentWcc);
             }
 
-            if (HasUnsupportedAttributeUpdates(arguments.new_attributes))
-            {
-                return CreateFailureResult(nfsstat3.NFS3ERR_NOTSUPP, currentWcc);
-            }
-
             if (!TryResolveTimestampUpdatePlan(
                 arguments.new_attributes,
                 out bool setAccessTime,
@@ -58,27 +63,97 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 return CreateFailureResult(nfsstat3.NFS3ERR_INVAL, currentWcc);
             }
 
-            if (!setAccessTime && !setModificationTime)
-            {
-                return CreateFailureResult(nfsstat3.NFS3ERR_NOTSUPP, currentWcc);
-            }
+            INfsAttributeMutation? attributeMutation = _server.Capabilities.AttributeMutation;
+            NfsPathInfo afterPathInfo;
 
-            if (!TryApplySupportedTimestampUpdates(
-                resolution.PathInfo,
-                setAccessTime,
-                accessTimeUtc,
-                setModificationTime,
-                modificationTimeUtc,
-                out nfsstat3 failureStatus))
+            if (attributeMutation is null)
             {
-                return CreateFailureResult(failureStatus, currentWcc);
-            }
+                if (HasUnsupportedAttributeUpdates(arguments.new_attributes))
+                {
+                    return CreateFailureResult(nfsstat3.NFS3ERR_NOTSUPP, currentWcc);
+                }
 
-            NfsGetPathInfoResponse afterPathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
-                    new NfsGetPathInfoRequest(
-                        resolution.Target!.SourcePath,
-                        cancellationToken)).ConfigureAwait(false);
+                if (!setAccessTime && !setModificationTime)
+                {
+                    return CreateFailureResult(nfsstat3.NFS3ERR_NOTSUPP, currentWcc);
+                }
+
+                if (!TryApplyLegacyTimestampUpdates(
+                    resolution.PathInfo,
+                    setAccessTime,
+                    accessTimeUtc,
+                    setModificationTime,
+                    modificationTimeUtc,
+                    out nfsstat3 failureStatus))
+                {
+                    return CreateFailureResult(failureStatus, currentWcc);
+                }
+
+                NfsGetPathInfoResponse afterPathInfoResponse =
+                    await _server.Settings.FileSystem.GetPathInfoAsync(
+                        new NfsGetPathInfoRequest(
+                            resolution.Target!.SourcePath,
+                            cancellationToken)).ConfigureAwait(false);
+                afterPathInfo = afterPathInfoResponse.PathInfo;
+            }
+            else
+            {
+                sattr3? attributes = arguments.new_attributes;
+                ulong? size = attributes?.size?.set_it == true ? attributes.size.size?.Value?.Value ?? 0UL : null;
+                uint? mode = attributes?.mode?.set_it == true ? (attributes.mode.mode?.Value?.Value ?? 0U) & 0xFFFU : null;
+                uint? userId = attributes?.uid?.set_it == true ? attributes.uid.uid?.Value?.Value ?? 0U : null;
+                uint? groupId = attributes?.gid?.set_it == true ? attributes.gid.gid?.Value?.Value ?? 0U : null;
+
+                if (size.HasValue)
+                {
+                    if (resolution.PathInfo!.Kind == NfsPathKind.Directory)
+                    {
+                        return CreateFailureResult(nfsstat3.NFS3ERR_ISDIR, currentWcc);
+                    }
+
+                    if (resolution.PathInfo.Kind != NfsPathKind.File)
+                    {
+                        return CreateFailureResult(nfsstat3.NFS3ERR_INVAL, currentWcc);
+                    }
+                }
+
+                if (!size.HasValue
+                    && !mode.HasValue
+                    && !userId.HasValue
+                    && !groupId.HasValue
+                    && !setAccessTime
+                    && !setModificationTime)
+                {
+                    afterPathInfo = resolution.PathInfo!;
+                }
+                else
+                {
+                    try
+                    {
+                        NfsSetAttributesResponse response = await attributeMutation.SetAttributesAsync(
+                            new NfsSetAttributesRequest(
+                                resolution.Target!.SourcePath,
+                                resolution.PathInfo!.Kind,
+                                size,
+                                mode,
+                                userId,
+                                groupId,
+                                setAccessTime ? accessTimeUtc : null,
+                                setModificationTime ? modificationTimeUtc : null,
+                                cancellationToken)).ConfigureAwait(false);
+                        afterPathInfo = response?.PathInfo
+                            ?? throw new InvalidOperationException("The attribute-mutation capability returned a null response.");
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        return CreateFailureResult(MapException(exception), currentWcc);
+                    }
+                }
+            }
 
             return new SETATTR3res
             {
@@ -88,8 +163,29 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                     obj_wcc = Nfs3MetadataResolver.CreateWeakCacheConsistencyData(
                         resolution.Target,
                         resolution.PathInfo,
-                        afterPathInfoResponse.PathInfo),
+                        afterPathInfo),
                 },
+            };
+        }
+
+        protected override void WriteResult(SETATTR3res result, XdrWriter writer)
+        {
+            result.WriteTo(writer);
+        }
+
+        internal static nfsstat3 MapException(Exception exception)
+        {
+            return exception switch
+            {
+                UnauthorizedAccessException => nfsstat3.NFS3ERR_ACCES,
+                FileNotFoundException => nfsstat3.NFS3ERR_STALE,
+                DirectoryNotFoundException => nfsstat3.NFS3ERR_STALE,
+                PathTooLongException => nfsstat3.NFS3ERR_NAMETOOLONG,
+                IOException => nfsstat3.NFS3ERR_IO,
+                NotSupportedException => nfsstat3.NFS3ERR_NOTSUPP,
+                OverflowException => nfsstat3.NFS3ERR_FBIG,
+                ArgumentException => nfsstat3.NFS3ERR_INVAL,
+                _ => nfsstat3.NFS3ERR_SERVERFAULT,
             };
         }
 
@@ -140,12 +236,12 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 return true;
             }
 
-            if (!TryResolveTimestamp(attributes.atime, out setAccessTime, out accessTimeUtc))
+            if (!TryResolveTimestamp(attributes.atime?.set_it, attributes.atime?.atime_value, out setAccessTime, out accessTimeUtc))
             {
                 return false;
             }
 
-            if (!TryResolveTimestamp(attributes.mtime, out setModificationTime, out modificationTimeUtc))
+            if (!TryResolveTimestamp(attributes.mtime?.set_it, attributes.mtime?.mtime_value, out setModificationTime, out modificationTimeUtc))
             {
                 return false;
             }
@@ -154,14 +250,15 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
         }
 
         private static bool TryResolveTimestamp(
-            set_atime? setTime,
+            time_how? how,
+            nfstime3? clientTime,
             out bool shouldSetTime,
             out DateTimeOffset timestampUtc)
         {
             shouldSetTime = false;
             timestampUtc = DateTimeOffset.UtcNow;
 
-            time_how behavior = setTime?.set_it ?? time_how.DONT_CHANGE;
+            time_how behavior = how ?? time_how.DONT_CHANGE;
             switch (behavior)
             {
                 case time_how.DONT_CHANGE:
@@ -173,47 +270,13 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                     return true;
 
                 case time_how.SET_TO_CLIENT_TIME:
-                    if (setTime?.atime_value is null)
+                    if (clientTime is null)
                     {
                         return false;
                     }
 
                     shouldSetTime = true;
-                    timestampUtc = ConvertWireTimeToUtc(setTime.atime_value);
-                    return true;
-
-                default:
-                    return false;
-            }
-        }
-
-        private static bool TryResolveTimestamp(
-            set_mtime? setTime,
-            out bool shouldSetTime,
-            out DateTimeOffset timestampUtc)
-        {
-            shouldSetTime = false;
-            timestampUtc = DateTimeOffset.UtcNow;
-
-            time_how behavior = setTime?.set_it ?? time_how.DONT_CHANGE;
-            switch (behavior)
-            {
-                case time_how.DONT_CHANGE:
-                    return true;
-
-                case time_how.SET_TO_SERVER_TIME:
-                    shouldSetTime = true;
-                    timestampUtc = DateTimeOffset.UtcNow;
-                    return true;
-
-                case time_how.SET_TO_CLIENT_TIME:
-                    if (setTime?.mtime_value is null)
-                    {
-                        return false;
-                    }
-
-                    shouldSetTime = true;
-                    timestampUtc = ConvertWireTimeToUtc(setTime.mtime_value);
+                    timestampUtc = ConvertWireTimeToUtc(clientTime);
                     return true;
 
                 default:
@@ -235,7 +298,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             return baseTime.AddTicks(ticks);
         }
 
-        private static bool TryApplySupportedTimestampUpdates(
+        private static bool TryApplyLegacyTimestampUpdates(
             NfsPathInfo? pathInfo,
             bool setAccessTime,
             DateTimeOffset accessTimeUtc,
@@ -342,11 +405,6 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                     obj_wcc = objectWeakCacheConsistency,
                 },
             };
-        }
-
-        protected override void WriteResult(SETATTR3res result, XdrWriter writer)
-        {
-            result.WriteTo(writer);
         }
     }
 }

@@ -6,7 +6,7 @@ Use this checklist before any branch claims that a protocol version or security 
 
 - `dotnet build src/OpenNFS.sln -c Release -m:1` passes with no warnings promoted to errors and no failed projects.
 - `pwsh ./scripts/Generate-Xdr.ps1 -Check` passes with no generator drift.
-- `dotnet run --project src/Test.Automated/Test.Automated.csproj -c Release --no-build -- --results artifacts/touchstone-results.json` passes.
+- `dotnet run --project src/Test.Automated/Test.Automated.csproj -c Release --no-build --framework net10.0 -- --results artifacts/touchstone-results.json` passes (the runner multi-targets, so `--framework` is required), including `MountSessionSuites` and the Docker-backed `InteropMountSessionSuites`.
 - `dotnet test src/Test.Xunit/Test.Xunit.csproj -c Release --no-build` passes.
 - `dotnet test src/Test.Nunit/Test.Nunit.csproj -c Release --no-build` passes.
 - `pwsh ./scripts/release/Assert-NoSkippedTests.ps1` passes on the release branch.
@@ -15,6 +15,9 @@ Use this checklist before any branch claims that a protocol version or security 
 
 ## Package and sample gates
 
+- The package version in `src/Directory.Build.props` matches the `CHANGELOG.md` heading being released (currently `0.1.1`).
+- `dotnet pack` of both public packages into `artifacts/nuget-<version>` produces a `.nupkg` and `.snupkg` per package whose nuspec carries the `MIT` license expression, `README.md`, and the `https://github.com/jchristn/OpenNFS` repository URL, and whose `lib/` folders carry the bundled internal assemblies with XML docs (PDBs in the `.snupkg`).
+- A clean console app outside the repository restores both packages from that folder and runs an in-process `OpenNfsServerApplication` plus the mounted-session client APIs.
 - `dotnet pack src/OpenNFS.Server/OpenNFS.Server.csproj -c Release` produces `.nupkg` and `.snupkg`.
 - `dotnet pack src/OpenNFS.Client/OpenNFS.Client.csproj -c Release` produces `.nupkg` and `.snupkg`.
 - Clean external package-consumer validation continues to pass for both public packages.

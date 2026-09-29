@@ -184,7 +184,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 type = MapPathType(pathInfo.Kind),
                 mode = new mode3
                 {
-                    Value = CreateUInt32(GetModeValue(pathInfo.Kind)),
+                    Value = CreateUInt32(pathInfo.Mode ?? GetModeValue(pathInfo.Kind)),
                 },
                 nlink = CreateUInt32(pathInfo.Kind == NfsPathKind.Directory ? DirectoryLinkCount : DefaultLinkCount),
                 uid = new uid3

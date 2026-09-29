@@ -6,14 +6,19 @@ namespace OpenNFS.Server.FileSystems
     using System.Text;
     using System.Threading.Tasks;
     using OpenNFS.Server.Abstractions;
+    using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
 
     /// <summary>
     /// Built-in disk-backed <see cref="INfsFileSystem"/> implementation for host-local exports.
+    /// Also implements <see cref="INfsAttributeMutation"/>, so NFS clients can truncate or extend files and change timestamps and modes.
     /// </summary>
-    public sealed class LocalNfsFileSystem : INfsFileSystem
+    public sealed class LocalNfsFileSystem : INfsFileSystem, INfsAttributeMutation
     {
+        private const uint OwnerWriteBit = 0x80;
+        private const uint WritePermissionBits = 0x92;
+        private const uint DefaultFileMode = 0x1A4;
         /// <summary>
         /// Gets a reusable default instance of the stateless local filesystem implementation.
         /// </summary>
@@ -42,6 +47,13 @@ namespace OpenNFS.Server.FileSystems
             request.CancellationToken.ThrowIfCancellationRequested();
 
             string resolvedSourcePath = Path.Combine(request.DirectorySourcePath, request.EntryName);
+            if (!IsRepresentableEntryName(request.EntryName))
+            {
+                // The host would alias this name to a different entry (for example Windows trims trailing spaces and dots),
+                // so it cannot exist here.
+                return Task.FromResult(new NfsLookupPathResponse(new NfsPathInfo(resolvedSourcePath, NfsPathKind.Missing)));
+            }
+
             return Task.FromResult(new NfsLookupPathResponse(GetPathInfo(resolvedSourcePath)));
         }
 
@@ -238,6 +250,7 @@ namespace OpenNFS.Server.FileSystems
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
+            RequireRepresentableEntryName(request.EntryName);
             string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
             if (File.Exists(resolvedSourcePath) || Directory.Exists(resolvedSourcePath))
             {
@@ -278,6 +291,7 @@ namespace OpenNFS.Server.FileSystems
             ArgumentNullException.ThrowIfNull(request);
             request.CancellationToken.ThrowIfCancellationRequested();
 
+            RequireRepresentableEntryName(request.EntryName);
             string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
             if (File.Exists(resolvedSourcePath) || Directory.Exists(resolvedSourcePath))
             {
@@ -319,12 +333,18 @@ namespace OpenNFS.Server.FileSystems
             request.CancellationToken.ThrowIfCancellationRequested();
 
             string resolvedSourcePath = Path.Combine(request.ParentDirectorySourcePath, request.EntryName);
+            if (!IsRepresentableEntryName(request.EntryName))
+            {
+                throw new FileNotFoundException("The entry name cannot exist on this host file system.", resolvedSourcePath);
+            }
+
             switch (request.PathKind)
             {
                 case NfsPathKind.File:
                 case NfsPathKind.SymbolicLink:
                     if (File.Exists(resolvedSourcePath))
                     {
+                        ClearWindowsReadOnlyAttribute(resolvedSourcePath);
                         File.Delete(resolvedSourcePath);
                     }
 
@@ -357,6 +377,12 @@ namespace OpenNFS.Server.FileSystems
 
             string sourceSourcePath = Path.Combine(request.SourceParentDirectorySourcePath, request.SourceEntryName);
             string destinationSourcePath = Path.Combine(request.DestinationParentDirectorySourcePath, request.DestinationEntryName);
+            if (!IsRepresentableEntryName(request.SourceEntryName))
+            {
+                throw new FileNotFoundException("The source entry name cannot exist on this host file system.", sourceSourcePath);
+            }
+
+            RequireRepresentableEntryName(request.DestinationEntryName);
 
             if (string.Equals(
                 sourceSourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
@@ -380,6 +406,11 @@ namespace OpenNFS.Server.FileSystems
             {
                 case NfsPathKind.File:
                 case NfsPathKind.SymbolicLink:
+                    if (replacedExistingDestination && request.ReplaceExistingDestination && File.Exists(destinationSourcePath))
+                    {
+                        ClearWindowsReadOnlyAttribute(destinationSourcePath);
+                    }
+
                     File.Move(sourceSourcePath, destinationSourcePath, request.ReplaceExistingDestination);
                     break;
 
@@ -413,6 +444,229 @@ namespace OpenNFS.Server.FileSystems
                     replacedExistingDestination));
         }
 
+        /// <summary>
+        /// Applies size, timestamp, and mode changes to a host-local path.
+        /// On Unix-like hosts the mode is applied with <see cref="File.SetUnixFileMode(string, UnixFileMode)"/>.
+        /// On Windows only the owner-write bit of a file's mode is persisted, as the read-only attribute; mode changes on
+        /// Windows directories are not supported. Numeric owner and group changes are not supported by the built-in local
+        /// file system unless they match the reported owner (<c>0</c>).
+        /// </summary>
+        /// <param name="request">Request context for the attribute update.</param>
+        /// <returns>The path information observed after the update was applied.</returns>
+        /// <exception cref="FileNotFoundException">Thrown when the source path does not exist.</exception>
+        /// <exception cref="NotSupportedException">Thrown when a requested change cannot be represented by the host file system.</exception>
+        public Task<NfsSetAttributesResponse> SetAttributesAsync(NfsSetAttributesRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            string sourcePath = request.SourcePath;
+            NfsPathInfo pathInfo = GetPathInfo(sourcePath);
+            if (!pathInfo.Exists)
+            {
+                throw new FileNotFoundException("The source path does not exist.", sourcePath);
+            }
+
+            if ((request.UserId.HasValue && request.UserId.Value != 0U)
+                || (request.GroupId.HasValue && request.GroupId.Value != 0U))
+            {
+                throw new NotSupportedException("The built-in local file system does not support changing the numeric owner or group.");
+            }
+
+            if (request.Size.HasValue)
+            {
+                if (pathInfo.Kind != NfsPathKind.File)
+                {
+                    throw new NotSupportedException("Only regular files can be resized.");
+                }
+
+                long newLength = checked((long)request.Size.Value);
+                using (FileStream stream = new FileStream(
+                    sourcePath,
+                    FileMode.Open,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete))
+                {
+                    stream.SetLength(newLength);
+                    stream.Flush(flushToDisk: true);
+                }
+            }
+
+            if (request.Mode.HasValue)
+            {
+                ApplyMode(sourcePath, pathInfo.Kind, request.Mode.Value & 0xFFFU);
+            }
+
+            bool isDirectory = pathInfo.Kind == NfsPathKind.Directory;
+            if (request.AccessTimeUtc.HasValue)
+            {
+                if (isDirectory)
+                {
+                    Directory.SetLastAccessTimeUtc(sourcePath, request.AccessTimeUtc.Value.UtcDateTime);
+                }
+                else
+                {
+                    File.SetLastAccessTimeUtc(sourcePath, request.AccessTimeUtc.Value.UtcDateTime);
+                }
+            }
+
+            if (request.ModificationTimeUtc.HasValue)
+            {
+                if (isDirectory)
+                {
+                    Directory.SetLastWriteTimeUtc(sourcePath, request.ModificationTimeUtc.Value.UtcDateTime);
+                }
+                else
+                {
+                    File.SetLastWriteTimeUtc(sourcePath, request.ModificationTimeUtc.Value.UtcDateTime);
+                }
+            }
+
+            return Task.FromResult(new NfsSetAttributesResponse(GetPathInfo(sourcePath)));
+        }
+
+        /// <summary>
+        /// Determines whether an NFS entry name can be stored verbatim by the host file system.
+        /// On Windows, names that end with a space or a dot are silently trimmed by the OS, names containing
+        /// <c>&lt; &gt; : " | ? *</c>, a backslash, or control characters are invalid or address alternate data streams, and
+        /// reserved device names (CON, PRN, AUX, NUL, COM1-COM9, LPT1-LPT9, with or without an extension) do not name files;
+        /// all of those would alias a different entry, so they are rejected rather than silently remapped.
+        /// On other hosts only names containing <c>/</c> or NUL are rejected.
+        /// </summary>
+        internal static bool IsRepresentableEntryName(string entryName)
+        {
+            if (string.IsNullOrEmpty(entryName)
+                || string.Equals(entryName, ".", StringComparison.Ordinal)
+                || string.Equals(entryName, "..", StringComparison.Ordinal)
+                || entryName.IndexOf('/') >= 0
+                || entryName.IndexOf('\0') >= 0)
+            {
+                return false;
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                return true;
+            }
+
+            char last = entryName[entryName.Length - 1];
+            if (last == ' ' || last == '.')
+            {
+                return false;
+            }
+
+            foreach (char character in entryName)
+            {
+                if (character < ' ' || character == '<' || character == '>' || character == ':' || character == '"'
+                    || character == '|' || character == '?' || character == '*' || character == '\\')
+                {
+                    return false;
+                }
+            }
+
+            string stem = entryName;
+            int dotIndex = stem.IndexOf('.');
+            if (dotIndex >= 0)
+            {
+                stem = stem.Substring(0, dotIndex);
+            }
+
+            stem = stem.TrimEnd(' ');
+            if (stem.Length == 3)
+            {
+                return !(string.Equals(stem, "CON", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(stem, "PRN", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(stem, "AUX", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(stem, "NUL", StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (stem.Length == 4
+                && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+                && stem[3] >= '1' && stem[3] <= '9')
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void RequireRepresentableEntryName(string entryName)
+        {
+            if (!IsRepresentableEntryName(entryName))
+            {
+                throw new ArgumentException(
+                    "The entry name '" + entryName + "' cannot be stored verbatim by the host file system (for example, Windows trims trailing spaces and dots and reserves some characters and device names).",
+                    nameof(entryName));
+            }
+        }
+
+        private static void ClearWindowsReadOnlyAttribute(string sourcePath)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            FileAttributes attributes = File.GetAttributes(sourcePath);
+            if ((attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+            {
+                File.SetAttributes(sourcePath, attributes & ~FileAttributes.ReadOnly);
+            }
+        }
+
+        private static void ApplyMode(string sourcePath, NfsPathKind pathKind, uint mode)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(sourcePath, (UnixFileMode)mode);
+                return;
+            }
+
+            if (pathKind != NfsPathKind.File)
+            {
+                throw new NotSupportedException("Changing the mode of a directory or symbolic link is not supported on Windows hosts.");
+            }
+
+            FileAttributes attributes = File.GetAttributes(sourcePath);
+            FileAttributes updatedAttributes = (mode & OwnerWriteBit) == 0
+                ? attributes | FileAttributes.ReadOnly
+                : attributes & ~FileAttributes.ReadOnly;
+            if (updatedAttributes != attributes)
+            {
+                File.SetAttributes(sourcePath, updatedAttributes);
+            }
+        }
+
+        private static uint? GetMode(FileSystemInfo fileSystemInfo, bool isDirectory, bool isSymbolicLink)
+        {
+            try
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    return (uint)fileSystemInfo.UnixFileMode & 0xFFFU;
+                }
+
+                if (!isDirectory && !isSymbolicLink && (fileSystemInfo.Attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                {
+                    return DefaultFileMode & ~WritePermissionBits;
+                }
+
+                return null;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                return null;
+            }
+        }
+
         private static NfsPathInfo GetPathInfo(string sourcePath)
         {
             if (TryGetAttributes(sourcePath, out FileAttributes attributes))
@@ -430,7 +684,8 @@ namespace OpenNFS.Server.FileSystems
                         (ulong)Encoding.UTF8.GetByteCount(targetPath),
                         CreateAccessTime(fileSystemInfo),
                         CreateModificationTime(fileSystemInfo),
-                        CreateChangeTime(fileSystemInfo));
+                        CreateChangeTime(fileSystemInfo),
+                        GetMode(fileSystemInfo, isDirectory, isSymbolicLink: true));
                 }
 
                 if (isDirectory)
@@ -442,7 +697,8 @@ namespace OpenNFS.Server.FileSystems
                         0,
                         CreateAccessTime(directoryInfo),
                         CreateModificationTime(directoryInfo),
-                        CreateChangeTime(directoryInfo));
+                        CreateChangeTime(directoryInfo),
+                        GetMode(directoryInfo, isDirectory: true, isSymbolicLink: false));
                 }
 
                 FileInfo fileInfo = new FileInfo(sourcePath);
@@ -452,7 +708,8 @@ namespace OpenNFS.Server.FileSystems
                     (ulong)fileInfo.Length,
                     CreateAccessTime(fileInfo),
                     CreateModificationTime(fileInfo),
-                    CreateChangeTime(fileInfo));
+                    CreateChangeTime(fileInfo),
+                    GetMode(fileInfo, isDirectory: false, isSymbolicLink: false));
             }
 
             return new NfsPathInfo(sourcePath, NfsPathKind.Missing);

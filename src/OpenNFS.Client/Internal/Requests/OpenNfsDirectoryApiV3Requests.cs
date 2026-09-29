@@ -13,7 +13,7 @@ namespace OpenNFS.Client.Internal
         internal static OpenNfsV3ProcedureRequest CreateLookupRequest(byte[] directoryHandle, string entryName)
         {
             byte[] safeDirectoryHandle = OpenNfsClientArgument.RequireBytes(directoryHandle, nameof(directoryHandle), allowEmpty: false);
-            string safeEntryName = OpenNfsClientArgument.RequireText(entryName, nameof(entryName));
+            string safeEntryName = OpenNfsClientArgument.RequireEntryName(entryName, nameof(entryName));
             OpenNfsClientXdrWriter writer = new OpenNfsClientXdrWriter();
             writer.WriteOpaque(safeDirectoryHandle);
             writer.WriteString(safeEntryName);
@@ -177,7 +177,7 @@ namespace OpenNFS.Client.Internal
         private static diropargs3 CreateDirectoryOperationArguments(byte[] directoryHandle, string entryName)
         {
             byte[] safeDirectoryHandle = OpenNfsClientArgument.RequireBytes(directoryHandle, nameof(directoryHandle), allowEmpty: false);
-            string safeEntryName = OpenNfsClientArgument.RequireText(entryName, nameof(entryName));
+            string safeEntryName = OpenNfsClientArgument.RequireEntryName(entryName, nameof(entryName));
             return new diropargs3
             {
                 dir = new nfs_fh3

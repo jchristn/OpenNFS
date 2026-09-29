@@ -99,7 +99,15 @@ namespace OpenNFS.Server.Internal.V42
                 activeConnectionTasks = connectionTasks.ToArray();
             }
 
-            await Task.WhenAll(activeConnectionTasks).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(activeConnectionTasks).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Connections that were still open when the host stopped end with cancellation or transport errors;
+                // those per-connection outcomes must not fail the shutdown itself.
+            }
             cancellationTokenSource.Dispose();
         }
 

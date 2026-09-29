@@ -39,6 +39,6 @@ cleanup() {
 
 trap cleanup TERM INT
 
-rpc.mountd -F --port 20048 --manage-gids &
+rpc.mountd -F --port "${MOUNTD_PORT:-20048}" --manage-gids &
 mountd_pid=$!
 wait "$mountd_pid"

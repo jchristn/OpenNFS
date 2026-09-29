@@ -12,6 +12,15 @@
     <DebugType>portable</DebugType>
     <Authors>OpenNFS Contributors</Authors>
     <Company>OpenNFS</Company>
-    <Version>0.1.0</Version>
+    <Copyright>Copyright (c) 2026 OpenNFS Contributors</Copyright>
+    <Version>0.1.1</Version>
+    <PackageProjectUrl>https://github.com/jchristn/OpenNFS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/jchristn/OpenNFS</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

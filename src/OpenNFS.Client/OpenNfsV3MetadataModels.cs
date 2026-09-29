@@ -17,6 +17,51 @@ namespace OpenNFS.Client
         public uint Seconds { get; }
 
         public uint Nanoseconds { get; }
+
+        /// <summary>
+        /// Converts the NFSv3 timestamp to a UTC <see cref="DateTime"/>.
+        /// The value is the Unix epoch plus <see cref="Seconds"/> plus <see cref="Nanoseconds"/> truncated to 100-nanosecond ticks.
+        /// </summary>
+        /// <returns>The equivalent UTC timestamp with <see cref="DateTimeKind.Utc"/>.</returns>
+        public DateTime ToDateTimeUtc()
+        {
+            uint nanoseconds = Nanoseconds > 999_999_999U ? 999_999_999U : Nanoseconds;
+            return DateTime.SpecifyKind(
+                DateTime.UnixEpoch.AddSeconds(Seconds).AddTicks(nanoseconds / 100U),
+                DateTimeKind.Utc);
+        }
+
+        /// <summary>
+        /// Creates an NFSv3 timestamp from a <see cref="DateTime"/>.
+        /// Values with <see cref="DateTimeKind.Local"/> are converted to UTC first; <see cref="DateTimeKind.Unspecified"/> values are treated as UTC.
+        /// Sub-second precision is preserved to 100-nanosecond ticks.
+        /// </summary>
+        /// <param name="value">Timestamp to convert.</param>
+        /// <returns>The equivalent NFSv3 timestamp.</returns>
+        /// <exception cref="ArgumentOutOfRangeException">
+        /// Thrown when <paramref name="value"/> is before the Unix epoch or beyond the unsigned 32-bit NFSv3 seconds range.
+        /// </exception>
+        public static OpenNfsV3Time FromDateTimeUtc(DateTime value)
+        {
+            DateTime utcValue = value.Kind == DateTimeKind.Local
+                ? value.ToUniversalTime()
+                : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+            if (utcValue < DateTime.UnixEpoch)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "NFSv3 timestamps cannot represent values before the Unix epoch.");
+            }
+
+            long elapsedTicks = utcValue.Ticks - DateTime.UnixEpoch.Ticks;
+            long seconds = elapsedTicks / TimeSpan.TicksPerSecond;
+            if (seconds > uint.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "NFSv3 timestamps cannot represent values beyond the unsigned 32-bit seconds range.");
+            }
+
+            long remainderTicks = elapsedTicks % TimeSpan.TicksPerSecond;
+            return new OpenNfsV3Time((uint)seconds, (uint)(remainderTicks * 100L));
+        }
     }
 
     /// <summary>

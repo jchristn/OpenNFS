@@ -985,6 +985,81 @@ namespace OpenNFS.Client.Apis
         }
 
         /// <summary>
+        /// Executes an NFSv3 <c>SETATTR</c> request and decodes the typed result.
+        /// Use this to change the mode, owner, group, size (truncate or extend), and access or modification timestamps of a file or directory.
+        /// </summary>
+        /// <param name="fileHandle">Filehandle bytes of the object to update.</param>
+        /// <param name="attributes">Requested attribute changes.</param>
+        /// <param name="guardChangeTime">
+        /// Optional ctime guard. When supplied, the server applies the change only if the object's current change time matches
+        /// this value, and otherwise returns <see cref="OpenNfsV3Status.NotSynchronized"/>.
+        /// </param>
+        /// <param name="cancellationToken">Cancellation token for the execution operation.</param>
+        /// <returns>The typed NFSv3 SETATTR result.</returns>
+        public Task<OpenNfsV3SetAttributesResult> SetAttributesV3Async(
+            byte[] fileHandle,
+            OpenNfsV3SetAttributes attributes,
+            OpenNfsV3Time? guardChangeTime,
+            CancellationToken cancellationToken)
+        {
+            return _client.ExecuteV3ProcedureAsync(
+                OpenNfsV3SetAttributesEncoder.CreateRequest(fileHandle, attributes, guardChangeTime),
+                "NFSv3 SETATTR",
+                guardChangeTime is null
+                    ? OpenNfsTransportPipelineIdempotency.Idempotent
+                    : OpenNfsTransportPipelineIdempotency.NonIdempotent,
+                ReadSetAttributesV3Result,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts an NFSv3 <c>SETATTR</c> request without throwing a managed client exception on transport or protocol failure.
+        /// A non-success NFSv3 status is still reported through <see cref="OpenNfsV3SetAttributesResult.Status"/> on a successful envelope.
+        /// </summary>
+        /// <param name="fileHandle">Filehandle bytes of the object to update.</param>
+        /// <param name="attributes">Requested attribute changes.</param>
+        /// <param name="guardChangeTime">Optional ctime guard.</param>
+        /// <param name="cancellationToken">Cancellation token for the execution operation.</param>
+        /// <returns>A typed non-throwing result envelope.</returns>
+        public Task<OpenNfsClientResult<OpenNfsV3SetAttributesResult>> TrySetAttributesV3Async(
+            byte[] fileHandle,
+            OpenNfsV3SetAttributes attributes,
+            OpenNfsV3Time? guardChangeTime,
+            CancellationToken cancellationToken)
+        {
+            return OpenNfsClientResultFactory.TryAsync(() => SetAttributesV3Async(fileHandle, attributes, guardChangeTime, cancellationToken));
+        }
+
+        /// <summary>
+        /// Prepares an NFSv3 <c>SETATTR</c> plan.
+        /// </summary>
+        /// <param name="fileHandle">Filehandle bytes of the object to update.</param>
+        /// <param name="attributes">Requested attribute changes.</param>
+        /// <param name="guardChangeTime">Optional ctime guard.</param>
+        /// <param name="cancellationToken">Cancellation token for the planning operation.</param>
+        /// <returns>The validated raw procedure plan.</returns>
+        public Task<OpenNfsV3ProcedurePlan> PrepareSetAttributesV3Async(
+            byte[] fileHandle,
+            OpenNfsV3SetAttributes attributes,
+            OpenNfsV3Time? guardChangeTime,
+            CancellationToken cancellationToken)
+        {
+            return _client.PrepareV3ProcedureAsync(
+                OpenNfsV3SetAttributesEncoder.CreateRequest(fileHandle, attributes, guardChangeTime),
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Decodes a typed NFSv3 <c>SETATTR</c> result from a full encoded RPC reply.
+        /// </summary>
+        /// <param name="encodedReply">Full encoded RPC reply bytes.</param>
+        /// <returns>The typed NFSv3 SETATTR result.</returns>
+        public OpenNfsV3SetAttributesResult ReadSetAttributesV3Result(ReadOnlyMemory<byte> encodedReply)
+        {
+            return OpenNfsNfsV3ReplyDecoder.ReadSetAttributesResult(encodedReply);
+        }
+
+        /// <summary>
         /// Executes an NFSv3 <c>ACCESS</c> request and decodes the typed result.
         /// </summary>
         /// <param name="fileHandle">Filehandle bytes.</param>
@@ -1571,7 +1646,7 @@ namespace OpenNFS.Client.Apis
             }
 
             string safeOwner = OpenNfsClientArgument.RequireText(openOwner, nameof(openOwner));
-            string safeEntryName = OpenNfsClientArgument.RequireText(entryName, nameof(entryName));
+            string safeEntryName = OpenNfsClientArgument.RequireEntryName(entryName, nameof(entryName));
             return new OPEN4args
             {
                 seqid = CreateSequenceId(sequenceId, nameof(sequenceId)),

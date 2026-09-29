@@ -256,6 +256,71 @@ namespace OpenNFS.Client
             }
         }
 
+        /// <summary>
+        /// Gets a value indicating whether the client queries the server's portmapper (rpcbind, program 100000 version 2)
+        /// to discover the MOUNT v3 port, and the NFSv3 port when <see cref="HasExplicitServerPort"/> is <c>false</c>.
+        /// Explicitly configured endpoints always take precedence over discovered ports.
+        /// Default value: <c>false</c>.
+        /// </summary>
+        public bool EnablePortmapperDiscovery { get; private set; }
+
+        /// <summary>
+        /// Gets the TCP port of the server's portmapper used when <see cref="EnablePortmapperDiscovery"/> is <c>true</c>.
+        /// Default value: <c>111</c>.
+        /// </summary>
+        public int PortmapperPort { get; private set; } = 111;
+
+        /// <summary>
+        /// Gets a value indicating whether the NFS server port was set explicitly (for example through
+        /// <see cref="OpenNfsClientBuilder.WithServerPort(int)"/> or <see cref="OpenNfsClientBuilder.WithPrimaryEndpoint(string, int)"/>).
+        /// Settings constructed directly treat the port as explicit.
+        /// </summary>
+        public bool HasExplicitServerPort { get; private set; } = true;
+
+        /// <summary>
+        /// Gets the maximum number of persistent TCP connections the client keeps per remote endpoint.
+        /// Each connection multiplexes many outstanding RPCs by transaction id; a new connection is opened only when every
+        /// existing connection to that endpoint is busy and the limit has not been reached.
+        /// Default value: <c>4</c>. Minimum value: <c>1</c>. Maximum value: <c>64</c>.
+        /// </summary>
+        public int MaxConnectionsPerEndpoint { get; private set; } = 4;
+
+        /// <summary>
+        /// Gets how long an unused pooled TCP connection stays open before the client closes it.
+        /// Default value: <c>00:00:30</c>.
+        /// </summary>
+        public TimeSpan IdleConnectionTimeout { get; private set; } = TimeSpan.FromSeconds(30);
+
+        internal OpenNfsClientSettings ApplyConnectionPoolOptions(int maxConnectionsPerEndpoint, TimeSpan idleConnectionTimeout)
+        {
+            if (maxConnectionsPerEndpoint < 1 || maxConnectionsPerEndpoint > 64)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxConnectionsPerEndpoint), maxConnectionsPerEndpoint, "The maximum connections per endpoint must be between 1 and 64.");
+            }
+
+            if (idleConnectionTimeout <= TimeSpan.Zero || idleConnectionTimeout > TimeSpan.FromHours(1))
+            {
+                throw new ArgumentOutOfRangeException(nameof(idleConnectionTimeout), idleConnectionTimeout, "The idle connection timeout must be greater than zero and no more than one hour.");
+            }
+
+            MaxConnectionsPerEndpoint = maxConnectionsPerEndpoint;
+            IdleConnectionTimeout = idleConnectionTimeout;
+            return this;
+        }
+
+        internal OpenNfsClientSettings ApplyPortmapperOptions(bool enablePortmapperDiscovery, int portmapperPort, bool hasExplicitServerPort)
+        {
+            if (portmapperPort < 1 || portmapperPort > 65535)
+            {
+                throw new ArgumentOutOfRangeException(nameof(portmapperPort), portmapperPort, "The portmapper port must be between 1 and 65535.");
+            }
+
+            EnablePortmapperDiscovery = enablePortmapperDiscovery;
+            PortmapperPort = portmapperPort;
+            HasExplicitServerPort = hasExplicitServerPort;
+            return this;
+        }
+
         private static OpenNfsEndpoint[] CopyAlternateEndpoints(IReadOnlyCollection<OpenNfsEndpoint>? alternateEndpoints, OpenNfsEndpoint primaryEndpoint)
         {
             if (alternateEndpoints is null || alternateEndpoints.Count < 1)

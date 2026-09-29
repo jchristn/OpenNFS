@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>Public client surface for OpenNFS.</Description>
+    <Description>Native C# NFS client (ONC RPC, MOUNT v3, NFSv3, NFSv4.x) with a path-first mounted-session API for whole-file, ranged, and streaming I/O, directory listings with attributes, SETATTR, and optional portmapper discovery. Alpha.</Description>
     <IsPackable>true</IsPackable>
     <PackageId>OpenNFS.Client</PackageId>
-    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Title>OpenNFS.Client</Title>
-    <PackageTags>nfs;client;onc-rpc</PackageTags>
+    <PackageTags>nfs;nfsv3;nfsv4;client;onc-rpc;mount;portmapper;storage</PackageTags>
+    <PackageReleaseNotes>v0.1.1: fixes WriteAllBytesAsync truncation, create-if-missing, short writes, COMMIT/verifier handling, and FSINFO-sized transfers; adds NFSv3 SETATTR (client API and server INfsAttributeMutation capability), ranged/stream reads, stream writes, rename, READDIRPLUS listings, mkdir -p, exists/set-length/set-times, opt-in portmapper discovery, persistent multiplexed TCP connections (no connection per RPC), and verbatim path components. See CHANGELOG.md.</PackageReleaseNotes>
     <NoWarn>$(NoWarn);NU5128</NoWarn>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

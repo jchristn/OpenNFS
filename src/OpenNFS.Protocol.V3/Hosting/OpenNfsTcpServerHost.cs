@@ -227,7 +227,15 @@ namespace OpenNFS.Protocol.V3.Hosting
                 connectionTasks = _connectionTasks.ToArray();
             }
 
-            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Connections that were still open when the host stopped end with cancellation or transport errors;
+                // those per-connection outcomes must not fail the shutdown itself.
+            }
             _cancellationTokenSource.Dispose();
         }
 
@@ -358,6 +366,10 @@ namespace OpenNFS.Protocol.V3.Hosting
                         break;
                     }
                     catch (IOException)
+                    {
+                        break;
+                    }
+                    catch (TimeoutException)
                     {
                         break;
                     }
