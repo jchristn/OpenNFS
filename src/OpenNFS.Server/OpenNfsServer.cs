@@ -4,8 +4,10 @@ namespace OpenNFS.Server
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Immutable server wrapper that currently exposes validated configuration and export resolution state.
@@ -64,7 +66,12 @@ namespace OpenNFS.Server
             ArgumentNullException.ThrowIfNull(request);
 
             NfsCreateFileHandleResponse? response =
-                await Settings.FileHandleProvider.CreateAsync(request).ConfigureAwait(false);
+                await OpenNfsServerInstrumentation.TrackBackendAsync(
+                    OpenNfsTelemetryNames.CapabilityFileHandles,
+                    "create",
+                    Settings.FileHandleProvider,
+                    request,
+                    static (provider, value) => provider.CreateAsync(value)).ConfigureAwait(false);
 
             if (response is null)
             {
@@ -99,7 +106,12 @@ namespace OpenNFS.Server
             ArgumentNullException.ThrowIfNull(request);
 
             NfsResolveFileHandleResponse? response =
-                await Settings.FileHandleProvider.ResolveAsync(request).ConfigureAwait(false);
+                await OpenNfsServerInstrumentation.TrackBackendAsync(
+                    OpenNfsTelemetryNames.CapabilityFileHandles,
+                    "resolve",
+                    Settings.FileHandleProvider,
+                    request,
+                    static (provider, value) => provider.ResolveAsync(value)).ConfigureAwait(false);
 
             if (response is null)
             {
@@ -139,7 +151,12 @@ namespace OpenNFS.Server
             ArgumentNullException.ThrowIfNull(request);
 
             NfsGetExportsResponse? providerResponse =
-                await Settings.ExportProvider.GetExportsAsync(request).ConfigureAwait(false);
+                await OpenNfsServerInstrumentation.TrackBackendAsync(
+                    OpenNfsTelemetryNames.CapabilityExports,
+                    "get_exports",
+                    Settings.ExportProvider,
+                    request,
+                    static (provider, value) => provider.GetExportsAsync(value)).ConfigureAwait(false);
 
             if (providerResponse is null)
             {
@@ -164,7 +181,7 @@ namespace OpenNFS.Server
                 }
 
                 NfsGetPathInfoResponse? pathInfoResponse =
-                    await Settings.FileSystem.GetPathInfoAsync(
+                    await Settings.InstrumentedFileSystem.GetPathInfoAsync(
                         new NfsGetPathInfoRequest(exportDefinition.SourcePath, request.CancellationToken)).ConfigureAwait(false);
 
                 if (pathInfoResponse is null)

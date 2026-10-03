@@ -63,7 +63,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 writeResponse =
-                    await _server.Settings.FileSystem.WriteFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.WriteFileAsync(
                         new NfsWriteFileRequest(
                             resolution.Target!.SourcePath,
                             offset,

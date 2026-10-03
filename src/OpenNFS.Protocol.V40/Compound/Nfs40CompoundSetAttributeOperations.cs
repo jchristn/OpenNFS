@@ -68,7 +68,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 if (update!.HasAclUpdate)
                 {
-                    await _server.Capabilities.Acls!.SetAclAsync(
+                    await _server.Capabilities.TrackedAcls!.SetAclAsync(
                         new NfsSetAclRequest(
                             refreshedHandle.Target.SourcePath,
                             refreshedHandle.PathInfo.Kind,
@@ -80,7 +80,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 if (update.HasIdentityUpdate)
                 {
                     NfsSetIdentityResponse identityResponse =
-                        await _server.Capabilities.IdMapper!.SetIdentityAsync(
+                        await _server.Capabilities.TrackedIdMapper!.SetIdentityAsync(
                             new NfsSetIdentityRequest(
                                 refreshedHandle.Target.SourcePath,
                                 refreshedHandle.PathInfo.Kind,

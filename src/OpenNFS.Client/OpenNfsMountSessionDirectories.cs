@@ -5,6 +5,8 @@ namespace OpenNFS.Client
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Client.Internal;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Provides path-first directory helpers over an <see cref="OpenNfsMountSession"/>.
@@ -25,6 +27,22 @@ namespace OpenNFS.Client
         /// <param name="cancellationToken">Cancellation token for the directory read.</param>
         /// <returns>The collected directory entries excluding <c>.</c> and <c>..</c>.</returns>
         public async Task<IReadOnlyList<OpenNfsV3DirectoryEntry>> ListAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("ListAsync");
+            try
+            {
+                IReadOnlyList<OpenNfsV3DirectoryEntry> result = await ListCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<IReadOnlyList<OpenNfsV3DirectoryEntry>> ListCoreAsync(string path, CancellationToken cancellationToken)
         {
             byte[] directoryHandle = await _session.ResolvePathHandleOrThrowAsync(path, "Mounted-session directory read", cancellationToken).ConfigureAwait(false);
             List<OpenNfsV3DirectoryEntry> entries = new List<OpenNfsV3DirectoryEntry>();
@@ -76,6 +94,21 @@ namespace OpenNFS.Client
         /// <returns>A task that completes when the directory has been created.</returns>
         public async Task CreateDirectoryAsync(string path, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("CreateDirectoryAsync");
+            try
+            {
+                await CreateDirectoryCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task CreateDirectoryCoreAsync(string path, CancellationToken cancellationToken)
+        {
             (byte[] ParentHandle, string EntryName) parent =
                 await _session.ResolveParentOrThrowAsync(path, "Mounted-session directory create", cancellationToken).ConfigureAwait(false);
 
@@ -104,9 +137,24 @@ namespace OpenNFS.Client
         /// </exception>
         public async Task CreateDirectoryAsync(string path, bool createParents, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("CreateDirectoryAsync");
+            try
+            {
+                await CreateDirectoryCoreAsync(path, createParents, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task CreateDirectoryCoreAsync(string path, bool createParents, CancellationToken cancellationToken)
+        {
             if (!createParents)
             {
-                await CreateDirectoryAsync(path, cancellationToken).ConfigureAwait(false);
+                await CreateDirectoryCoreAsync(path, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -191,6 +239,22 @@ namespace OpenNFS.Client
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved or the directory read fails.</exception>
         public async Task<IReadOnlyList<OpenNfsV3DirectoryPlusEntry>> ListWithAttributesAsync(string path, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("ListWithAttributesAsync");
+            try
+            {
+                IReadOnlyList<OpenNfsV3DirectoryPlusEntry> result = await ListWithAttributesCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<IReadOnlyList<OpenNfsV3DirectoryPlusEntry>> ListWithAttributesCoreAsync(string path, CancellationToken cancellationToken)
+        {
             const string OperationName = "Mounted-session directory read";
             byte[] directoryHandle = await _session.ResolvePathHandleOrThrowAsync(path, OperationName, cancellationToken).ConfigureAwait(false);
             OpenNfsMountSessionTransferSizes transferSizes = await _session.GetTransferSizesAsync(cancellationToken).ConfigureAwait(false);
@@ -235,6 +299,21 @@ namespace OpenNFS.Client
         /// <returns>A task that completes when the file has been created.</returns>
         public async Task CreateFileAsync(string path, bool failIfExists, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("CreateFileAsync");
+            try
+            {
+                await CreateFileCoreAsync(path, failIfExists, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task CreateFileCoreAsync(string path, bool failIfExists, CancellationToken cancellationToken)
+        {
             (byte[] ParentHandle, string EntryName) parent =
                 await _session.ResolveParentOrThrowAsync(path, "Mounted-session file create", cancellationToken).ConfigureAwait(false);
 
@@ -255,6 +334,21 @@ namespace OpenNFS.Client
         /// <returns>A task that completes when the file has been deleted.</returns>
         public async Task DeleteFileAsync(string path, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("DeleteFileAsync");
+            try
+            {
+                await DeleteFileCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task DeleteFileCoreAsync(string path, CancellationToken cancellationToken)
+        {
             (byte[] ParentHandle, string EntryName) parent =
                 await _session.ResolveParentOrThrowAsync(path, "Mounted-session file delete", cancellationToken).ConfigureAwait(false);
 
@@ -274,6 +368,21 @@ namespace OpenNFS.Client
         /// <param name="cancellationToken">Cancellation token for the delete operation.</param>
         /// <returns>A task that completes when the directory has been deleted.</returns>
         public async Task DeleteDirectoryAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("DeleteDirectoryAsync");
+            try
+            {
+                await DeleteDirectoryCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task DeleteDirectoryCoreAsync(string path, CancellationToken cancellationToken)
         {
             (byte[] ParentHandle, string EntryName) parent =
                 await _session.ResolveParentOrThrowAsync(path, "Mounted-session directory delete", cancellationToken).ConfigureAwait(false);

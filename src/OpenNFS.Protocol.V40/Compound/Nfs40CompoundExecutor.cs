@@ -3,6 +3,7 @@ namespace OpenNFS.Protocol.V40.Compound
     using System;
     using System.Buffers.Binary;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Text;
     using System.Threading;
@@ -10,6 +11,7 @@ namespace OpenNFS.Protocol.V40.Compound
     using OpenNFS.Protocol.V40.Generated;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Protocol.V40.State;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Server;
     using OpenNFS.Server.Delegations;
     using OpenNFS.Server.Requests;
@@ -17,6 +19,8 @@ namespace OpenNFS.Protocol.V40.Compound
 
     internal sealed class Nfs40CompoundExecutor
     {
+        private const string MinorVersionName = "0";
+
         private readonly OpenNfsServer _server;
         private readonly Nfs40StateManager _stateManager;
         private readonly Nfs40WriteStateTracker _writeState;
@@ -71,7 +75,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     block: false,
                     reclaim: false,
                     cancellationToken);
-                _ = await _server.Capabilities.Locking.ProcessLockAsync(unlockRequest).ConfigureAwait(false);
+                _ = await _server.Capabilities.TrackedLocking!.ProcessLockAsync(unlockRequest).ConfigureAwait(false);
             }
         }
 
@@ -99,8 +103,21 @@ namespace OpenNFS.Protocol.V40.Compound
 
             for (int index = 0; index < operations.Length; index++)
             {
-                Nfs40CompoundOperationResult operationResult =
-                    await ExecuteOperationAsync(operations[index], state, cancellationToken).ConfigureAwait(false);
+                int operationNumber = (int)(operations[index].argop ?? nfs_opnum4.OP_ILLEGAL);
+                long operationStartTimestamp = Stopwatch.GetTimestamp();
+                Activity? operationActivity = OpenNfsServerInstrumentation.StartCompoundOperation(MinorVersionName, operationNumber);
+                Nfs40CompoundOperationResult operationResult;
+                try
+                {
+                    operationResult = await ExecuteOperationAsync(operations[index], state, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    OpenNfsServerInstrumentation.FailCompoundOperation(operationActivity, operationStartTimestamp, MinorVersionName, operationNumber, exception);
+                    throw;
+                }
+
+                OpenNfsServerInstrumentation.EndCompoundOperation(operationActivity, operationStartTimestamp, MinorVersionName, operationNumber, (int)operationResult.Status);
                 await ReleaseExpiredLocksAsync(cancellationToken).ConfigureAwait(false);
                 results.Add(operationResult.ResponseOperation);
 
@@ -985,7 +1002,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     try
                     {
                         NfsCreatePathResponse createDirectoryResponse =
-                            await _server.Settings.FileSystem.CreatePathAsync(
+                            await _server.Settings.InstrumentedFileSystem.CreatePathAsync(
                                 new NfsCreatePathRequest(
                                     refreshedDirectory.Target.SourcePath,
                                     entryName,
@@ -1042,7 +1059,7 @@ namespace OpenNFS.Protocol.V40.Compound
                     try
                     {
                         NfsCreateSymbolicLinkResponse createLinkResponse =
-                            await _server.Settings.FileSystem.CreateSymbolicLinkAsync(
+                            await _server.Settings.InstrumentedFileSystem.CreateSymbolicLinkAsync(
                                 new NfsCreateSymbolicLinkRequest(
                                     refreshedDirectory.Target.SourcePath,
                                     entryName,
@@ -1297,7 +1314,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 try
                 {
-                    await _server.Capabilities.AttributeMutation!.SetAttributesAsync(
+                    await _server.Capabilities.TrackedAttributeMutation!.SetAttributesAsync(
                         new NfsSetAttributesRequest(
                             refreshedHandle.Target.SourcePath,
                             refreshedHandle.PathInfo.Kind,
@@ -1341,7 +1358,7 @@ namespace OpenNFS.Protocol.V40.Compound
             {
                 if (update!.HasAclUpdate)
                 {
-                    await _server.Capabilities.Acls!.SetAclAsync(
+                    await _server.Capabilities.TrackedAcls!.SetAclAsync(
                         new NfsSetAclRequest(
                             refreshedHandle.Target.SourcePath,
                             refreshedHandle.PathInfo.Kind,
@@ -1353,7 +1370,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 if (update.HasIdentityUpdate)
                 {
                     NfsSetIdentityResponse identityResponse =
-                        await _server.Capabilities.IdMapper!.SetIdentityAsync(
+                        await _server.Capabilities.TrackedIdMapper!.SetIdentityAsync(
                             new NfsSetIdentityRequest(
                                 refreshedHandle.Target.SourcePath,
                                 refreshedHandle.PathInfo.Kind,
@@ -1474,7 +1491,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 NfsCreateHardLinkResponse createResponse =
-                    await _server.Settings.FileSystem.CreateHardLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreateHardLinkAsync(
                         new NfsCreateHardLinkRequest(
                             refreshedSource.Target.SourcePath,
                             refreshedDirectory.Target.SourcePath,
@@ -1622,7 +1639,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 arguments.reclaim,
                 cancellationToken);
             NfsLockResponse response =
-                await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
+                await _server.Capabilities.TrackedLocking!.ProcessLockAsync(request).ConfigureAwait(false);
             if (response.Disposition == NfsLockDisposition.Granted)
             {
                 Nfs40LockTransitionResult transition =
@@ -1706,7 +1723,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 reclaim: false,
                 cancellationToken);
             NfsLockResponse response =
-                await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
+                await _server.Capabilities.TrackedLocking!.ProcessLockAsync(request).ConfigureAwait(false);
             return CreateLockTestResult(
                 MapLockDisposition(response.Disposition),
                 deniedPayload: response.Disposition == NfsLockDisposition.Denied
@@ -1778,7 +1795,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 reclaim: false,
                 cancellationToken);
             NfsLockResponse response =
-                await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
+                await _server.Capabilities.TrackedLocking!.ProcessLockAsync(request).ConfigureAwait(false);
             if (response.Disposition != NfsLockDisposition.Granted)
             {
                 return CreateLockUnlockResult(MapLockDisposition(response.Disposition));
@@ -1828,7 +1845,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsLookupPathResponse lookupResponse =
-                await _server.Settings.FileSystem.LookupPathAsync(
+                await _server.Settings.InstrumentedFileSystem.LookupPathAsync(
                     new NfsLookupPathRequest(
                         refreshedHandle.Target.SourcePath,
                         entryName,
@@ -1944,7 +1961,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 commitResponse =
-                    await _server.Settings.FileSystem.CommitFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.CommitFileAsync(
                         new NfsCommitFileRequest(
                             refreshedHandle.Target.SourcePath,
                             arguments.offset.Value,
@@ -2219,7 +2236,7 @@ namespace OpenNFS.Protocol.V40.Compound
                             try
                             {
                                 NfsCreatePathResponse createResponse =
-                                    await _server.Settings.FileSystem.CreatePathAsync(
+                                    await _server.Settings.InstrumentedFileSystem.CreatePathAsync(
                                         new NfsCreatePathRequest(
                                             refreshedHandle.Target.SourcePath,
                                             entryName,
@@ -2391,7 +2408,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 && openedHandle is not null)
             {
                 NfsAcquireDelegationResponse delegationDecision =
-                    await _server.Capabilities.Delegations.AcquireDelegationAsync(
+                    await _server.Capabilities.TrackedDelegations!.AcquireDelegationAsync(
                         new NfsAcquireDelegationRequest(
                             openedHandle.Target.ExportPath,
                             openedHandle.Target.SourcePath,
@@ -2524,7 +2541,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             if (_server.Capabilities.Delegations is not null && transition.DelegationState is not null)
             {
-                await _server.Capabilities.Delegations.ReturnDelegationAsync(
+                await _server.Capabilities.TrackedDelegations!.ReturnDelegationAsync(
                     new NfsReturnDelegationRequest(
                         refreshedHandle.Target.ExportPath,
                         refreshedHandle.Target.SourcePath,
@@ -2704,7 +2721,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 writeResponse =
-                    await _server.Settings.FileSystem.WriteFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.WriteFileAsync(
                         new NfsWriteFileRequest(
                             refreshedHandle.Target.SourcePath,
                             arguments.offset.Value,
@@ -2793,7 +2810,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsReadFileResponse readResponse =
-                await _server.Settings.FileSystem.ReadFileAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadFileAsync(
                     new NfsReadFileRequest(
                         refreshedHandle.Target.SourcePath,
                         arguments.offset.Value,
@@ -2847,7 +2864,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsReadDirectoryResponse directoryResponse =
-                await _server.Settings.FileSystem.ReadDirectoryAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                     new NfsReadDirectoryRequest(
                         refreshedHandle.Target.SourcePath,
                         cancellationToken)).ConfigureAwait(false);
@@ -2965,7 +2982,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 readResponse =
-                    await _server.Settings.FileSystem.ReadSymbolicLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.ReadSymbolicLinkAsync(
                         new NfsReadSymbolicLinkRequest(
                             refreshedHandle.Target.SourcePath,
                             cancellationToken)).ConfigureAwait(false);
@@ -3062,7 +3079,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             try
             {
-                await _server.Settings.FileSystem.DeletePathAsync(
+                await _server.Settings.InstrumentedFileSystem.DeletePathAsync(
                     new NfsDeletePathRequest(
                         refreshedDirectory.Target.SourcePath,
                         entryName,
@@ -3210,7 +3227,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 if (destinationIsDirectory)
                 {
                     NfsReadDirectoryResponse destinationDirectoryResponse =
-                        await _server.Settings.FileSystem.ReadDirectoryAsync(
+                        await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                             new NfsReadDirectoryRequest(destinationChildPathInfo.Path, cancellationToken)).ConfigureAwait(false);
                     if (destinationDirectoryResponse.Entries.Count > 0)
                     {
@@ -3224,7 +3241,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             try
             {
-                await _server.Settings.FileSystem.RenamePathAsync(
+                await _server.Settings.InstrumentedFileSystem.RenamePathAsync(
                     new NfsRenamePathRequest(
                         refreshedSourceDirectory.Target.SourcePath,
                         oldName,
@@ -3592,7 +3609,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             try
             {
-                await _server.Capabilities.AttributeMutation!.SetAttributesAsync(
+                await _server.Capabilities.TrackedAttributeMutation!.SetAttributesAsync(
                     new NfsSetAttributesRequest(
                         openedHandle.Target.SourcePath,
                         openedHandle.PathInfo.Kind,
@@ -3834,7 +3851,7 @@ namespace OpenNFS.Protocol.V40.Compound
         {
             NfsFileHandle fileHandle = await _server.CreateFileHandleAsync(target, cancellationToken).ConfigureAwait(false);
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             return new Nfs40CompoundResolvedHandle(fileHandle, target, pathInfoResponse.PathInfo);
@@ -3843,7 +3860,7 @@ namespace OpenNFS.Protocol.V40.Compound
         private async Task<NfsPathInfo> GetPathInfoAsync(string sourcePath, CancellationToken cancellationToken)
         {
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(sourcePath, cancellationToken)).ConfigureAwait(false);
             return pathInfoResponse.PathInfo;
         }
@@ -3854,7 +3871,7 @@ namespace OpenNFS.Protocol.V40.Compound
             CancellationToken cancellationToken)
         {
             NfsLookupPathResponse lookupResponse =
-                await _server.Settings.FileSystem.LookupPathAsync(
+                await _server.Settings.InstrumentedFileSystem.LookupPathAsync(
                     new NfsLookupPathRequest(
                         directoryTarget.SourcePath,
                         entryName,
@@ -3876,7 +3893,7 @@ namespace OpenNFS.Protocol.V40.Compound
             for (int index = 0; index < recallRequests.Count; index++)
             {
                 Nfs40DelegationRecallInfo recall = recallRequests[index];
-                await _server.Capabilities.Delegations.RecallDelegationAsync(
+                await _server.Capabilities.TrackedDelegations!.RecallDelegationAsync(
                     new NfsRecallDelegationRequest(
                         exportPath,
                         sourcePath,
@@ -3893,7 +3910,7 @@ namespace OpenNFS.Protocol.V40.Compound
             CancellationToken cancellationToken)
         {
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(resolvedHandle.Target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             if (!pathInfoResponse.PathInfo.Exists)
@@ -3921,7 +3938,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(resolutionResponse.Resolution.Target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             if (!pathInfoResponse.PathInfo.Exists)

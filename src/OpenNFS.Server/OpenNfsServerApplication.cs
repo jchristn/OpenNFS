@@ -12,13 +12,15 @@ namespace OpenNFS.Server
     using OpenNFS.Protocol.V41.Compound;
     using OpenNFS.Protocol.V41.Sessions;
     using OpenNFS.Protocol.V41.State;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Public runnable application surface that hides the current version-specific hosting internals.
     /// </summary>
-    public sealed class OpenNfsServerApplication : IAsyncDisposable
+    public sealed class OpenNfsServerApplication : IAsyncDisposable, IOpenNfsServerStateSource
     {
         private const string NfsV3AssemblyName = "OpenNFS.Protocol.V3";
         private const string NfsV3HostTypeName = "OpenNFS.Protocol.V3.Hosting.OpenNfsTcpServerHost";
@@ -46,6 +48,7 @@ namespace OpenNFS.Server
             _options.Validate();
             _server = server;
             ListenerAddress = _options.ListenerAddress;
+            OpenNfsServerInstrumentation.StateSources.Register(this);
         }
 
         /// <summary>
@@ -230,6 +233,7 @@ namespace OpenNFS.Server
                     _nfs41Host = startedNfs41Host;
                     _nfs42Host = startedNfs42Host;
                     IsRunning = true;
+                    OpenNfsServerInstrumentation.RecordLifecycleEvent(OpenNfsTelemetryNames.EventStarted);
                 }
                 catch (OperationCanceledException)
                 {
@@ -254,6 +258,7 @@ namespace OpenNFS.Server
                     }
 
                     ResetBoundPorts();
+                    OpenNfsServerInstrumentation.RecordLifecycleEvent(OpenNfsTelemetryNames.EventStartFailed);
                     throw;
                 }
                 catch (Exception exception)
@@ -279,6 +284,7 @@ namespace OpenNFS.Server
                     }
 
                     ResetBoundPorts();
+                    OpenNfsServerInstrumentation.RecordLifecycleEvent(OpenNfsTelemetryNames.EventStartFailed);
 
                     if (exception is OpenNfsServerException)
                     {
@@ -334,6 +340,11 @@ namespace OpenNFS.Server
                 _nfs40Host = null;
                 _nfs41Host = null;
                 _nfs42Host = null;
+                if (IsRunning)
+                {
+                    OpenNfsServerInstrumentation.RecordLifecycleEvent(OpenNfsTelemetryNames.EventStopped);
+                }
+
                 IsRunning = false;
                 ResetBoundPorts();
             }
@@ -423,6 +434,11 @@ namespace OpenNFS.Server
                 _nfs40Host = null;
                 _nfs41Host = null;
                 _nfs42Host = null;
+                if (IsRunning)
+                {
+                    OpenNfsServerInstrumentation.RecordLifecycleEvent(OpenNfsTelemetryNames.EventStopped);
+                }
+
                 IsRunning = false;
                 ResetBoundPorts();
             }
@@ -451,6 +467,17 @@ namespace OpenNFS.Server
                 await nfsV3Host.DisposeAsync().ConfigureAwait(false);
             }
 
+        }
+
+        void IOpenNfsServerStateSource.ReadState(OpenNfsServerStateCounts counts)
+        {
+            if (!IsRunning)
+            {
+                return;
+            }
+
+            counts.RunningApplications += 1;
+            counts.MaximumConnections += _server.Settings.MaximumConnections;
         }
 
         private static IAsyncDisposable RequireAsyncDisposable(object instance, string typeName)

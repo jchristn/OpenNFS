@@ -10,7 +10,9 @@ namespace OpenNFS.Client.Sessions
     using OpenNFS.Protocol.V41.Generated;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Rpc.Transport;
+    using OpenNFS.Telemetry;
     using OpenNFS.Rpc.Xdr;
 
     /// <summary>
@@ -187,10 +189,17 @@ namespace OpenNFS.Client.Sessions
                     try
                     {
                         reply = await BuildReplyAsync(request, cancellationToken).ConfigureAwait(false);
+                        OpenNfsClientInstrumentation.RecordCallback(OpenNfsTelemetryNames.OutcomeSuccess);
                     }
                     catch (OperationCanceledException)
                     {
+                        OpenNfsClientInstrumentation.RecordCallback(OpenNfsTelemetryNames.OutcomeCancelled);
                         break;
+                    }
+                    catch (Exception)
+                    {
+                        OpenNfsClientInstrumentation.RecordCallback(OpenNfsTelemetryNames.OutcomeException);
+                        throw;
                     }
 
                     try

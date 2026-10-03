@@ -2,6 +2,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Protocol.V3.Generated;
@@ -10,6 +11,8 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
     using OpenNFS.Rpc.Security.RpcSecGss;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     internal sealed class Nfs3ProcedureDispatcher
     {
@@ -97,11 +100,13 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 
             if (_rpcSecGssAuthenticator is not null)
             {
+                long authStartTimestamp = Stopwatch.GetTimestamp();
                 RpcSecGssCallDisposition gssDisposition = await RpcSecGssCallProcessor.ProcessAsync(
                     request,
                     _rpcSecGssAuthenticator,
                     _rpcSecGssMechanism,
                     cancellationToken).ConfigureAwait(false);
+                OpenNfsServerInstrumentation.RecordStage(request, OpenNfsTelemetryNames.StageAuth, authStartTimestamp);
                 if (!gssDisposition.ContinueProcessing)
                 {
                     return gssDisposition.Reply!;
@@ -116,11 +121,15 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                         status: accept_stat.PROC_UNAVAIL);
             }
 
-            if (_duplicateRequestCache.TryGetReplay(request, out RpcMessageEnvelope? cachedReply))
+            long replayStartTimestamp = Stopwatch.GetTimestamp();
+            bool replayHit = _duplicateRequestCache.TryGetReplay(request, out RpcMessageEnvelope? cachedReply);
+            OpenNfsServerInstrumentation.RecordStage(request, OpenNfsTelemetryNames.StageReplayCache, replayStartTimestamp);
+            if (replayHit)
             {
                 return cachedReply!;
             }
 
+            long executeStartTimestamp = Stopwatch.GetTimestamp();
             RpcMessageEnvelope reply;
             if (_handlers.TryGetValue(callBody.proc, out INfs3ProcedureHandler? handler))
             {
@@ -139,6 +148,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                     status: accept_stat.PROC_UNAVAIL);
             }
 
+            OpenNfsServerInstrumentation.RecordStage(request, OpenNfsTelemetryNames.StageExecute, executeStartTimestamp);
             _duplicateRequestCache.StoreReply(request, reply);
             return reply;
         }

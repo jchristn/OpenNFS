@@ -3,10 +3,13 @@ namespace OpenNFS.Client.Internal
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Per-client pool of persistent, multiplexed TCP connections keyed by endpoint.
@@ -14,7 +17,7 @@ namespace OpenNFS.Client.Internal
     /// every existing connection already has outstanding calls and the limit has not been reached, otherwise the least-loaded
     /// connection is shared. Connections idle for longer than the idle timeout are closed by a background sweep.
     /// </summary>
-    internal sealed class OpenNfsRpcConnectionPool : IAsyncDisposable
+    internal sealed class OpenNfsRpcConnectionPool : IAsyncDisposable, IOpenNfsClientStateSource
     {
         private readonly ConcurrentDictionary<string, EndpointSlot> _slots = new ConcurrentDictionary<string, EndpointSlot>(StringComparer.OrdinalIgnoreCase);
         private readonly Timer _idleSweep;
@@ -37,9 +40,10 @@ namespace OpenNFS.Client.Internal
             IdleTimeout = idleTimeout;
             TimeSpan sweepInterval = TimeSpan.FromMilliseconds(Math.Max(250, Math.Min(idleTimeout.TotalMilliseconds / 2, 15000)));
             _idleSweep = new Timer(static state => ((OpenNfsRpcConnectionPool)state!).SweepIdle(), this, sweepInterval, sweepInterval);
+            OpenNfsClientInstrumentation.Pools.Register(this);
         }
 
-        internal int MaxConnectionsPerEndpoint { get; }
+        public int MaxConnectionsPerEndpoint { get; }
 
         internal TimeSpan IdleTimeout { get; }
 
@@ -88,8 +92,20 @@ namespace OpenNFS.Client.Internal
             for (int attempt = 0; ; attempt++)
             {
                 ThrowIfDisposed();
-                (OpenNfsPooledRpcConnection connection, bool _) =
-                    await AcquireAsync(endpoint, connectionTimeout, operationName, cancellationToken).ConfigureAwait(false);
+                long acquireStartTimestamp = Stopwatch.GetTimestamp();
+                OpenNfsPooledRpcConnection connection;
+                bool reused;
+                try
+                {
+                    (connection, reused) = await AcquireAsync(endpoint, connectionTimeout, operationName, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    OpenNfsClientInstrumentation.RecordAcquire(acquireStartTimestamp, OpenNfsTelemetryNames.ResultFailed);
+                    throw;
+                }
+
+                OpenNfsClientInstrumentation.RecordAcquire(acquireStartTimestamp, reused ? OpenNfsTelemetryNames.ResultReused : OpenNfsTelemetryNames.ResultCreated);
 
                 try
                 {
@@ -110,6 +126,7 @@ namespace OpenNFS.Client.Internal
             }
 
             _idleSweep.Dispose();
+            OpenNfsClientInstrumentation.Pools.Unregister(this);
             foreach (EndpointSlot slot in _slots.Values)
             {
                 List<OpenNfsPooledRpcConnection> connections;
@@ -121,7 +138,7 @@ namespace OpenNFS.Client.Internal
 
                 foreach (OpenNfsPooledRpcConnection connection in connections)
                 {
-                    connection.Close();
+                    connection.Close(OpenNfsTelemetryNames.ReasonDisposed);
                 }
             }
 
@@ -167,8 +184,19 @@ namespace OpenNFS.Client.Internal
                 }
 
                 ThrowIfDisposed();
-                OpenNfsPooledRpcConnection created =
-                    await OpenNfsPooledRpcConnection.ConnectAsync(endpoint, connectionTimeout, operationName, cancellationToken).ConfigureAwait(false);
+                long connectStartTimestamp = Stopwatch.GetTimestamp();
+                OpenNfsPooledRpcConnection created;
+                try
+                {
+                    created = await OpenNfsPooledRpcConnection.ConnectAsync(endpoint, connectionTimeout, operationName, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    OpenNfsClientInstrumentation.RecordConnectionOpenFailed(connectStartTimestamp, exception);
+                    throw;
+                }
+
+                OpenNfsClientInstrumentation.RecordConnectionOpened(connectStartTimestamp);
                 Interlocked.Increment(ref _connectionsOpened);
 
                 lock (slot.SyncRoot)
@@ -178,7 +206,7 @@ namespace OpenNFS.Client.Internal
 
                 if (Volatile.Read(ref _disposed) != 0)
                 {
-                    created.Close();
+                    created.Close(OpenNfsTelemetryNames.ReasonDisposed);
                     ThrowIfDisposed();
                 }
 
@@ -254,7 +282,7 @@ namespace OpenNFS.Client.Internal
 
                 foreach (OpenNfsPooledRpcConnection connection in idle)
                 {
-                    connection.Retire();
+                    connection.Retire(OpenNfsTelemetryNames.ReasonIdle);
                 }
             }
         }

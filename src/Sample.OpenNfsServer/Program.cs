@@ -7,6 +7,7 @@ namespace Sample.OpenNfsServer
     using OpenNFS.Rpc.Security.Kerberos;
     using OpenNFS.Server;
     using OpenNFS.Server.FileHandles;
+    using Radiant;
     using Sample.OpenNfsServer.Providers;
 
     internal static class Program
@@ -22,6 +23,7 @@ namespace Sample.OpenNfsServer
                     return 0;
                 }
 
+                using RadiantHost? telemetryHost = SampleTelemetryHost.TryStart(configuration.Telemetry);
                 Directory.CreateDirectory(configuration.SourcePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(configuration.MappingPath) ?? configuration.SourcePath);
                 SampleContentSeeder.EnsureSeeded(configuration.SourcePath);
@@ -87,6 +89,14 @@ namespace Sample.OpenNfsServer
                     + " kerberos="
                     + (string.IsNullOrWhiteSpace(configuration.KerberosTargetSpn) ? "off" : configuration.KerberosTargetSpn));
                 Console.WriteLine("Export source: " + configuration.SourcePath);
+                Console.WriteLine(
+                    "Telemetry: "
+                    + (telemetryHost is null
+                        ? "off"
+                        : "OTLP " + configuration.Telemetry.OtlpEndpoint
+                            + (configuration.Telemetry.PrometheusEnabled
+                                ? ", Prometheus http://" + configuration.Telemetry.PrometheusHostname + ":" + configuration.Telemetry.PrometheusPort + "/metrics"
+                                : string.Empty)));
                 Console.WriteLine("Press Ctrl+C to stop.");
 
                 await Task.Delay(Timeout.Infinite, cancellationTokenSource.Token).ConfigureAwait(false);

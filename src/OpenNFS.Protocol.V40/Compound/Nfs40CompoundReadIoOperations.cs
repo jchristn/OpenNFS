@@ -63,7 +63,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsReadFileResponse readResponse =
-                await _server.Settings.FileSystem.ReadFileAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadFileAsync(
                     new NfsReadFileRequest(
                         refreshedHandle.Target.SourcePath,
                         arguments.offset.Value,
@@ -115,7 +115,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 readResponse =
-                    await _server.Settings.FileSystem.ReadSymbolicLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.ReadSymbolicLinkAsync(
                         new NfsReadSymbolicLinkRequest(
                             refreshedHandle.Target.SourcePath,
                             cancellationToken)).ConfigureAwait(false);

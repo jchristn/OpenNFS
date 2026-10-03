@@ -300,7 +300,7 @@ namespace OpenNFS.Protocol.V3.Mount
             CancellationToken cancellationToken)
         {
             NfsAuthorizeMountResponse? response =
-                await _server.Settings.MountAuthorization.AuthorizeAsync(
+                await _server.Settings.InstrumentedMountAuthorization.AuthorizeAsync(
                     new NfsAuthorizeMountRequest(
                         operation,
                         hostName,

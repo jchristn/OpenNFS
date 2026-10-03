@@ -2,11 +2,12 @@ namespace OpenNFS.Protocol.V41.Sessions
 {
     using System;
     using System.Collections.Generic;
+    using OpenNFS.Rpc.Telemetry;
 
     /// <summary>
     /// Tracks established NFSv4.1 sessions keyed by their 16-byte session identifier.
     /// </summary>
-    public sealed class Nfs41SessionRegistry
+    public sealed class Nfs41SessionRegistry : IOpenNfsServerStateSource
     {
         private readonly object gate;
         private readonly Dictionary<string, Nfs41Session> sessions;
@@ -18,6 +19,7 @@ namespace OpenNFS.Protocol.V41.Sessions
         {
             gate = new object();
             sessions = new Dictionary<string, Nfs41Session>(StringComparer.Ordinal);
+            OpenNfsServerInstrumentation.StateSources.Register(this);
         }
 
         /// <summary>
@@ -87,6 +89,11 @@ namespace OpenNFS.Protocol.V41.Sessions
                     return sessions.Count;
                 }
             }
+        }
+
+        void IOpenNfsServerStateSource.ReadState(OpenNfsServerStateCounts counts)
+        {
+            counts.Nfs41Sessions += Count;
         }
     }
 }

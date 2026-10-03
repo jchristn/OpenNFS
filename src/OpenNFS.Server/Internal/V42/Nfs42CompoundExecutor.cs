@@ -2,18 +2,23 @@ namespace OpenNFS.Server.Internal.V42
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Protocol.V41.Sessions;
     using OpenNFS.Protocol.V42.Generated;
     using OpenNFS.Protocol.V42.Server.Operations;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Server.Requests;
     using OpenNFS.Server.Responses;
+    using OpenNFS.Telemetry;
 
     internal sealed class Nfs42CompoundExecutor
     {
         internal const uint SupportedMinorVersion = 2;
+
+        private const string MinorVersionName = "2";
 
         private readonly Nfs42AdvisoryOperationsProcessor advisoryProcessor;
         private readonly Nfs42CopyCloneProcessor copyCloneProcessor;
@@ -28,8 +33,8 @@ namespace OpenNFS.Server.Internal.V42
 
             this.server = server;
             this.sessionProcessor = sessionProcessor;
-            sparseProcessor = new Nfs42SparseFileProcessor(server.Capabilities.Sparse);
-            copyCloneProcessor = new Nfs42CopyCloneProcessor(server.Capabilities.CopyClone);
+            sparseProcessor = new Nfs42SparseFileProcessor(server.Capabilities.TrackedSparse);
+            copyCloneProcessor = new Nfs42CopyCloneProcessor(server.Capabilities.TrackedCopyClone);
             advisoryProcessor = new Nfs42AdvisoryOperationsProcessor();
         }
 
@@ -67,165 +72,193 @@ namespace OpenNFS.Server.Internal.V42
                 nfs_argop4 operation = operations[index];
                 nfs_opnum4? opnum = operation.argop;
 
-                if (!hasObservedSequence
-                    && opnum != nfs_opnum4.OP_EXCHANGE_ID
-                    && opnum != nfs_opnum4.OP_CREATE_SESSION
-                    && opnum != nfs_opnum4.OP_BIND_CONN_TO_SESSION
-                    && opnum != nfs_opnum4.OP_DESTROY_SESSION
-                    && opnum != nfs_opnum4.OP_DESTROY_CLIENTID
-                    && opnum != nfs_opnum4.OP_SEQUENCE)
+                int operationNumber = (int)(opnum ?? nfs_opnum4.OP_ILLEGAL);
+                long operationStartTimestamp = Stopwatch.GetTimestamp();
+                Activity? operationActivity = OpenNfsServerInstrumentation.StartCompoundOperation(MinorVersionName, operationNumber);
+                int telemetryStatus = (int)nfsstat4.NFS4_OK;
+                Exception? telemetryException = null;
+                try
                 {
-                    finalStatus = nfsstat4.NFS4ERR_OP_NOT_IN_SESSION;
-                    results.Add(BuildOpNotInSessionResult());
-                    break;
-                }
+                    if (!hasObservedSequence
+                        && opnum != nfs_opnum4.OP_EXCHANGE_ID
+                        && opnum != nfs_opnum4.OP_CREATE_SESSION
+                        && opnum != nfs_opnum4.OP_BIND_CONN_TO_SESSION
+                        && opnum != nfs_opnum4.OP_DESTROY_SESSION
+                        && opnum != nfs_opnum4.OP_DESTROY_CLIENTID
+                        && opnum != nfs_opnum4.OP_SEQUENCE)
+                    {
+                        finalStatus = nfsstat4.NFS4ERR_OP_NOT_IN_SESSION;
+                        telemetryStatus = (int)finalStatus;
+                        results.Add(BuildOpNotInSessionResult());
+                        break;
+                    }
 
-                nfs_resop4 result;
-                switch (opnum)
-                {
-                    case nfs_opnum4.OP_EXCHANGE_ID:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_EXCHANGE_ID,
-                            opexchange_id = sessionProcessor.ProcessExchangeId(operation.opexchange_id ?? new EXCHANGE_ID4args()),
-                        };
-                        break;
-                    case nfs_opnum4.OP_CREATE_SESSION:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_CREATE_SESSION,
-                            opcreate_session = sessionProcessor.ProcessCreateSession(operation.opcreate_session ?? new CREATE_SESSION4args(), context),
-                        };
-                        break;
-                    case nfs_opnum4.OP_DESTROY_SESSION:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_DESTROY_SESSION,
-                            opdestroy_session = sessionProcessor.ProcessDestroySession(operation.opdestroy_session ?? new DESTROY_SESSION4args()),
-                        };
-                        break;
-                    case nfs_opnum4.OP_DESTROY_CLIENTID:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_DESTROY_CLIENTID,
-                            opdestroy_clientid = sessionProcessor.ProcessDestroyClientId(operation.opdestroy_clientid ?? new DESTROY_CLIENTID4args()),
-                        };
-                        break;
-                    case nfs_opnum4.OP_BIND_CONN_TO_SESSION:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_BIND_CONN_TO_SESSION,
-                            opbind_conn_to_session = sessionProcessor.ProcessBindConnToSession(operation.opbind_conn_to_session ?? new BIND_CONN_TO_SESSION4args(), context),
-                        };
-                        break;
-                    case nfs_opnum4.OP_SEQUENCE:
-                        Nfs42SequenceOutcome sequenceOutcome = sessionProcessor.ProcessSequence(operation.opsequence ?? new SEQUENCE4args(), context);
-                        hasObservedSequence = true;
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_SEQUENCE,
-                            opsequence = sequenceOutcome.Result,
-                        };
-
-                        if (sequenceOutcome.State == Nfs41SlotState.Replay)
-                        {
-                            replayDetected = true;
-                        }
-                        else if (sequenceOutcome.State == Nfs41SlotState.Fresh)
-                        {
-                            freshSequenceOutcome = sequenceOutcome;
-                        }
-                        else
-                        {
-                            finalStatus = sequenceOutcome.Result.sr_status ?? nfsstat4.NFS4ERR_INVAL;
-                            results.Add(result);
-                            return new COMPOUND4res
+                    nfs_resop4 result;
+                    switch (opnum)
+                    {
+                        case nfs_opnum4.OP_EXCHANGE_ID:
+                            result = new nfs_resop4
                             {
-                                status = finalStatus,
-                                tag = GetTagOrEmpty(arguments.tag),
-                                resarray = results.ToArray(),
+                                resop = nfs_opnum4.OP_EXCHANGE_ID,
+                                opexchange_id = sessionProcessor.ProcessExchangeId(operation.opexchange_id ?? new EXCHANGE_ID4args()),
                             };
-                        }
+                            break;
+                        case nfs_opnum4.OP_CREATE_SESSION:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_CREATE_SESSION,
+                                opcreate_session = sessionProcessor.ProcessCreateSession(operation.opcreate_session ?? new CREATE_SESSION4args(), context),
+                            };
+                            break;
+                        case nfs_opnum4.OP_DESTROY_SESSION:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_DESTROY_SESSION,
+                                opdestroy_session = sessionProcessor.ProcessDestroySession(operation.opdestroy_session ?? new DESTROY_SESSION4args()),
+                            };
+                            break;
+                        case nfs_opnum4.OP_DESTROY_CLIENTID:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_DESTROY_CLIENTID,
+                                opdestroy_clientid = sessionProcessor.ProcessDestroyClientId(operation.opdestroy_clientid ?? new DESTROY_CLIENTID4args()),
+                            };
+                            break;
+                        case nfs_opnum4.OP_BIND_CONN_TO_SESSION:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_BIND_CONN_TO_SESSION,
+                                opbind_conn_to_session = sessionProcessor.ProcessBindConnToSession(operation.opbind_conn_to_session ?? new BIND_CONN_TO_SESSION4args(), context),
+                            };
+                            break;
+                        case nfs_opnum4.OP_SEQUENCE:
+                            Nfs42SequenceOutcome sequenceOutcome = sessionProcessor.ProcessSequence(operation.opsequence ?? new SEQUENCE4args(), context);
+                            OpenNfsServerInstrumentation.RecordSequenceResult(DescribeSlotState(sequenceOutcome.State));
+                            hasObservedSequence = true;
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_SEQUENCE,
+                                opsequence = sequenceOutcome.Result,
+                            };
 
+                            if (sequenceOutcome.State == Nfs41SlotState.Replay)
+                            {
+                                replayDetected = true;
+                            }
+                            else if (sequenceOutcome.State == Nfs41SlotState.Fresh)
+                            {
+                                freshSequenceOutcome = sequenceOutcome;
+                            }
+                            else
+                            {
+                                finalStatus = sequenceOutcome.Result.sr_status ?? nfsstat4.NFS4ERR_INVAL;
+                                telemetryStatus = (int)finalStatus;
+                                results.Add(result);
+                                return new COMPOUND4res
+                                {
+                                    status = finalStatus,
+                                    tag = GetTagOrEmpty(arguments.tag),
+                                    resarray = results.ToArray(),
+                                };
+                            }
+
+                            break;
+                        case nfs_opnum4.OP_PUTFH:
+                            result = await HandlePutFileHandleAsync(operation.opputfh ?? new PUTFH4args(), state, cancellationToken).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_PUTROOTFH:
+                            result = await HandlePutRootFileHandleAsync(state, cancellationToken).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_SAVEFH:
+                            result = HandleSaveFileHandle(state);
+                            break;
+                        case nfs_opnum4.OP_LOOKUP:
+                            result = await HandleLookupAsync(operation.oplookup ?? new LOOKUP4args(), state, cancellationToken).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_ALLOCATE:
+                            result = await HandleAllocateAsync(operation.opallocate ?? new ALLOCATE4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_COPY:
+                            result = await HandleCopyAsync(operation.opcopy ?? new COPY4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_COPY_NOTIFY:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_COPY_NOTIFY,
+                                opcopy_notify = await advisoryProcessor.ProcessCopyNotifyAsync(operation.opoffload_notify ?? new COPY_NOTIFY4args()).ConfigureAwait(false),
+                            };
+                            break;
+                        case nfs_opnum4.OP_DEALLOCATE:
+                            result = await HandleDeallocateAsync(operation.opdeallocate ?? new DEALLOCATE4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_IO_ADVISE:
+                            result = await HandleIoAdviseAsync(operation.opio_advise ?? new IO_ADVISE4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_OFFLOAD_CANCEL:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_OFFLOAD_CANCEL,
+                                opoffload_cancel = await advisoryProcessor.ProcessOffloadCancelAsync(operation.opoffload_cancel ?? new OFFLOAD_CANCEL4args()).ConfigureAwait(false),
+                            };
+                            break;
+                        case nfs_opnum4.OP_OFFLOAD_STATUS:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_OFFLOAD_STATUS,
+                                opoffload_status = await advisoryProcessor.ProcessOffloadStatusAsync(operation.opoffload_status ?? new OFFLOAD_STATUS4args()).ConfigureAwait(false),
+                            };
+                            break;
+                        case nfs_opnum4.OP_READ_PLUS:
+                            result = await HandleReadPlusAsync(operation.opread_plus ?? new READ_PLUS4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_SEEK:
+                            result = await HandleSeekAsync(operation.opseek ?? new SEEK4args(), state).ConfigureAwait(false);
+                            break;
+                        case nfs_opnum4.OP_WRITE_SAME:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_WRITE_SAME,
+                                opwrite_same = await advisoryProcessor.ProcessWriteSameAsync(operation.opwrite_same ?? new WRITE_SAME4args()).ConfigureAwait(false),
+                            };
+                            break;
+                        case nfs_opnum4.OP_CLONE:
+                            result = await HandleCloneAsync(operation.opclone ?? new CLONE4args(), state).ConfigureAwait(false);
+                            break;
+                        default:
+                            result = new nfs_resop4
+                            {
+                                resop = nfs_opnum4.OP_ILLEGAL,
+                                opillegal = new ILLEGAL4res { status = nfsstat4.NFS4ERR_NOTSUPP },
+                            };
+                            finalStatus = nfsstat4.NFS4ERR_NOTSUPP;
+                            break;
+                    }
+
+                    results.Add(result);
+
+                    nfsstat4? operationStatus = ExtractStatus(result);
+                    telemetryStatus = (int)(operationStatus ?? nfsstat4.NFS4_OK);
+                    if (operationStatus is not null && operationStatus.Value != nfsstat4.NFS4_OK)
+                    {
+                        finalStatus = operationStatus.Value;
                         break;
-                    case nfs_opnum4.OP_PUTFH:
-                        result = await HandlePutFileHandleAsync(operation.opputfh ?? new PUTFH4args(), state, cancellationToken).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_PUTROOTFH:
-                        result = await HandlePutRootFileHandleAsync(state, cancellationToken).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_SAVEFH:
-                        result = HandleSaveFileHandle(state);
-                        break;
-                    case nfs_opnum4.OP_LOOKUP:
-                        result = await HandleLookupAsync(operation.oplookup ?? new LOOKUP4args(), state, cancellationToken).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_ALLOCATE:
-                        result = await HandleAllocateAsync(operation.opallocate ?? new ALLOCATE4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_COPY:
-                        result = await HandleCopyAsync(operation.opcopy ?? new COPY4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_COPY_NOTIFY:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_COPY_NOTIFY,
-                            opcopy_notify = await advisoryProcessor.ProcessCopyNotifyAsync(operation.opoffload_notify ?? new COPY_NOTIFY4args()).ConfigureAwait(false),
-                        };
-                        break;
-                    case nfs_opnum4.OP_DEALLOCATE:
-                        result = await HandleDeallocateAsync(operation.opdeallocate ?? new DEALLOCATE4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_IO_ADVISE:
-                        result = await HandleIoAdviseAsync(operation.opio_advise ?? new IO_ADVISE4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_OFFLOAD_CANCEL:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_OFFLOAD_CANCEL,
-                            opoffload_cancel = await advisoryProcessor.ProcessOffloadCancelAsync(operation.opoffload_cancel ?? new OFFLOAD_CANCEL4args()).ConfigureAwait(false),
-                        };
-                        break;
-                    case nfs_opnum4.OP_OFFLOAD_STATUS:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_OFFLOAD_STATUS,
-                            opoffload_status = await advisoryProcessor.ProcessOffloadStatusAsync(operation.opoffload_status ?? new OFFLOAD_STATUS4args()).ConfigureAwait(false),
-                        };
-                        break;
-                    case nfs_opnum4.OP_READ_PLUS:
-                        result = await HandleReadPlusAsync(operation.opread_plus ?? new READ_PLUS4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_SEEK:
-                        result = await HandleSeekAsync(operation.opseek ?? new SEEK4args(), state).ConfigureAwait(false);
-                        break;
-                    case nfs_opnum4.OP_WRITE_SAME:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_WRITE_SAME,
-                            opwrite_same = await advisoryProcessor.ProcessWriteSameAsync(operation.opwrite_same ?? new WRITE_SAME4args()).ConfigureAwait(false),
-                        };
-                        break;
-                    case nfs_opnum4.OP_CLONE:
-                        result = await HandleCloneAsync(operation.opclone ?? new CLONE4args(), state).ConfigureAwait(false);
-                        break;
-                    default:
-                        result = new nfs_resop4
-                        {
-                            resop = nfs_opnum4.OP_ILLEGAL,
-                            opillegal = new ILLEGAL4res { status = nfsstat4.NFS4ERR_NOTSUPP },
-                        };
-                        finalStatus = nfsstat4.NFS4ERR_NOTSUPP;
-                        break;
+                    }
                 }
-
-                results.Add(result);
-
-                nfsstat4? operationStatus = ExtractStatus(result);
-                if (operationStatus is not null && operationStatus.Value != nfsstat4.NFS4_OK)
+                catch (Exception exception)
                 {
-                    finalStatus = operationStatus.Value;
-                    break;
+                    telemetryException = exception;
+                    throw;
+                }
+                finally
+                {
+                    if (telemetryException is null)
+                    {
+                        OpenNfsServerInstrumentation.EndCompoundOperation(operationActivity, operationStartTimestamp, MinorVersionName, operationNumber, telemetryStatus);
+                    }
+                    else
+                    {
+                        OpenNfsServerInstrumentation.FailCompoundOperation(operationActivity, operationStartTimestamp, MinorVersionName, operationNumber, telemetryException);
+                    }
                 }
             }
 
@@ -369,7 +402,7 @@ namespace OpenNFS.Server.Internal.V42
             }
 
             NfsLookupPathResponse lookupResponse =
-                await server.Settings.FileSystem.LookupPathAsync(
+                await server.Settings.InstrumentedFileSystem.LookupPathAsync(
                     new NfsLookupPathRequest(currentHandle.Target.SourcePath, entryName, cancellationToken)).ConfigureAwait(false);
 
             if (!lookupResponse.PathInfo.Exists)
@@ -604,7 +637,7 @@ namespace OpenNFS.Server.Internal.V42
         {
             NfsFileHandle fileHandle = await server.CreateFileHandleAsync(target, cancellationToken).ConfigureAwait(false);
             NfsGetPathInfoResponse pathInfoResponse =
-                await server.Settings.FileSystem.GetPathInfoAsync(
+                await server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(target.SourcePath, cancellationToken)).ConfigureAwait(false);
             return new Nfs42ResolvedHandle(fileHandle, target, pathInfoResponse.PathInfo);
         }
@@ -621,7 +654,7 @@ namespace OpenNFS.Server.Internal.V42
             }
 
             NfsGetPathInfoResponse pathInfoResponse =
-                await server.Settings.FileSystem.GetPathInfoAsync(
+                await server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(resolutionResponse.Resolution.Target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             if (!pathInfoResponse.PathInfo.Exists)
@@ -730,6 +763,25 @@ namespace OpenNFS.Server.Internal.V42
                     return result.opillegal?.status;
                 default:
                     return null;
+            }
+        }
+
+        private static string DescribeSlotState(Nfs41SlotState state)
+        {
+            switch (state)
+            {
+                case Nfs41SlotState.Fresh:
+                    return OpenNfsTelemetryNames.SlotStateFresh;
+                case Nfs41SlotState.Replay:
+                    return OpenNfsTelemetryNames.SlotStateReplay;
+                case Nfs41SlotState.BadSlot:
+                    return OpenNfsTelemetryNames.SlotStateBadSlot;
+                case Nfs41SlotState.Misordered:
+                    return OpenNfsTelemetryNames.SlotStateMisordered;
+                case Nfs41SlotState.RetryUncached:
+                    return OpenNfsTelemetryNames.SlotStateRetryUncached;
+                default:
+                    return OpenNfsTelemetryNames.ValueOther;
             }
         }
     }

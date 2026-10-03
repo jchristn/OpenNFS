@@ -1,0 +1,21 @@
+{
+  "serverName": "OpenNFS Sample (Docker)",
+  "exportPath": "/exports/sample",
+  "listenerAddress": "0.0.0.0",
+  "sourcePath": "/data/export",
+  "mappingPath": "/data/state/filehandles.json",
+  "mountPort": 20048,
+  "nfsPort": 2049,
+  "nfs40Port": 3049,
+  "denyMounts": false,
+  "telemetry": {
+    "enabled": true,
+    "serviceName": "opennfs-sample-server",
+    "otlpEndpoint": "http://otel-collector:4317",
+    "otlpProtocol": "grpc",
+    "prometheusEnabled": true,
+    "prometheusHostname": "127.0.0.1",
+    "prometheusPort": 9464,
+    "samplingRatio": 1.0
+  }
+}

@@ -95,7 +95,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 NfsCreatePathResponse createResponse =
-                    await _server.Settings.FileSystem.CreatePathAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreatePathAsync(
                         new NfsCreatePathRequest(
                             refreshedHandle.Target.SourcePath,
                             entryName,

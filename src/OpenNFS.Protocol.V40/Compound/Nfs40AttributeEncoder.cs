@@ -134,7 +134,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 }
 
                 identityResponse =
-                    await server.Capabilities.IdMapper.GetIdentityAsync(
+                    await server.Capabilities.TrackedIdMapper!.GetIdentityAsync(
                         new NfsGetIdentityRequest(
                             resolvedHandle.Target.SourcePath,
                             resolvedHandle.PathInfo.Kind,
@@ -150,7 +150,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 }
 
                 aclResponse =
-                    await server.Capabilities.Acls.GetAclAsync(
+                    await server.Capabilities.TrackedAcls!.GetAclAsync(
                         new NfsGetAclRequest(
                             resolvedHandle.Target.SourcePath,
                             resolvedHandle.PathInfo.Kind,

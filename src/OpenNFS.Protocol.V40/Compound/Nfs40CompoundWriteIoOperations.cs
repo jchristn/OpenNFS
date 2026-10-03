@@ -73,7 +73,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 commitResponse =
-                    await _server.Settings.FileSystem.CommitFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.CommitFileAsync(
                         new NfsCommitFileRequest(
                             refreshedHandle.Target.SourcePath,
                             arguments.offset.Value,
@@ -175,7 +175,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 writeResponse =
-                    await _server.Settings.FileSystem.WriteFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.WriteFileAsync(
                         new NfsWriteFileRequest(
                             refreshedHandle.Target.SourcePath,
                             arguments.offset.Value,

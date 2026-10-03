@@ -65,7 +65,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             uint count = arguments.count?.Value?.Value ?? 0U;
 
             NfsReadFileResponse readResponse =
-                await _server.Settings.FileSystem.ReadFileAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadFileAsync(
                     new NfsReadFileRequest(
                         resolution.Target!.SourcePath,
                         offset,

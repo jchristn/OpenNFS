@@ -2,6 +2,7 @@ namespace OpenNFS.Server.Internal.V42
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Net;
     using System.Net.Sockets;
@@ -10,7 +11,9 @@ namespace OpenNFS.Server.Internal.V42
     using OpenNFS.Protocol.V41.Compound;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Rpc.Transport;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Minimal TCP host for the initial NFSv4.2 surface.
@@ -68,6 +71,7 @@ namespace OpenNFS.Server.Internal.V42
             Nfs42CompoundService service = new Nfs42CompoundService(server, sessionProcessor);
             TcpListener listener = new TcpListener(bindAddress, nfsPort);
             listener.Start();
+            OpenNfsServerInstrumentation.ListenerStarted(OpenNfsTelemetryNames.ListenerNfs42);
 
             return new OpenNfsTcpNfs42ServerHost(listener, service);
         }
@@ -109,6 +113,7 @@ namespace OpenNFS.Server.Internal.V42
                 // those per-connection outcomes must not fail the shutdown itself.
             }
             cancellationTokenSource.Dispose();
+            OpenNfsServerInstrumentation.ListenerStopped(OpenNfsTelemetryNames.ListenerNfs42);
         }
 
         private static IPAddress ResolveBindAddress(string? listenerAddress)
@@ -194,59 +199,78 @@ namespace OpenNFS.Server.Internal.V42
             using (client)
             using (NetworkStream stream = client.GetStream())
             {
-                string remoteEndpoint = client.Client.RemoteEndPoint?.ToString() ?? Guid.NewGuid().ToString();
-                RpcTcpTransport transport = new RpcTcpTransport(
-                    stream,
-                    new RpcTransportOptions(
-                        timeouts: new RpcTransportTimeouts(
-                            readTimeout: TimeSpan.FromSeconds(60),
-                            writeTimeout: TimeSpan.FromSeconds(60))));
-
-                while (!cancellationToken.IsCancellationRequested)
+                OpenNfsServerInstrumentation.BeginConnectionScope();
+                long connectionOpenedTimestamp = OpenNfsServerInstrumentation.ConnectionOpened(OpenNfsTelemetryNames.ListenerNfs42);
+                string closeReason = OpenNfsTelemetryNames.ReasonShutdown;
+                try
                 {
-                    RpcMessageEnvelope request;
-                    try
-                    {
-                        request = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (EndOfStreamException)
-                    {
-                        break;
-                    }
-                    catch (IOException)
-                    {
-                        break;
-                    }
+                    string remoteEndpoint = client.Client.RemoteEndPoint?.ToString() ?? Guid.NewGuid().ToString();
+                    Func<RpcMessageEnvelope, CancellationToken, Task<RpcMessageEnvelope>> dispatch = OpenNfsServerInstrumentation.InstrumentHandler(
+                        (message, token) => service.DispatchAsync(message, remoteEndpoint, token),
+                        remoteEndpoint);
+                    RpcTcpTransport transport = new RpcTcpTransport(
+                        stream,
+                        new RpcTransportOptions(
+                            timeouts: new RpcTransportTimeouts(
+                                readTimeout: TimeSpan.FromSeconds(60),
+                                writeTimeout: TimeSpan.FromSeconds(60))));
 
-                    RpcMessageEnvelope reply;
-                    try
+                    while (!cancellationToken.IsCancellationRequested)
                     {
-                        reply = await service.DispatchAsync(request, remoteEndpoint, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception)
-                    {
-                        if (request.Header.body?.mtype != msg_type.CALL)
+                        RpcMessageEnvelope request;
+                        try
                         {
+                            request = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (EndOfStreamException)
+                        {
+                            closeReason = OpenNfsTelemetryNames.ReasonClientClosed;
+                            break;
+                        }
+                        catch (IOException)
+                        {
+                            closeReason = OpenNfsTelemetryNames.ReasonIoError;
                             break;
                         }
 
-                        reply = RpcMessageFactory.CreateAcceptedReply(
-                            xid: request.Header.xid,
-                            status: accept_stat.SYSTEM_ERR);
-                    }
+                        RpcMessageEnvelope reply;
+                        try
+                        {
+                            reply = await dispatch(request, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception)
+                        {
+                            if (request.Header.body?.mtype != msg_type.CALL)
+                            {
+                                closeReason = OpenNfsTelemetryNames.ReasonProtocolError;
+                                break;
+                            }
 
-                    try
-                    {
-                        await transport.SendAsync(reply, cancellationToken).ConfigureAwait(false);
+                            reply = RpcMessageFactory.CreateAcceptedReply(
+                                xid: request.Header.xid,
+                                status: accept_stat.SYSTEM_ERR);
+                        }
+
+                        try
+                        {
+                            long sendStartTimestamp = Stopwatch.GetTimestamp();
+                            await transport.SendAsync(reply, cancellationToken).ConfigureAwait(false);
+                            OpenNfsServerInstrumentation.RecordStage(request, OpenNfsTelemetryNames.StageSend, sendStartTimestamp);
+                        }
+                        catch (IOException)
+                        {
+                            closeReason = OpenNfsTelemetryNames.ReasonSendFailed;
+                            break;
+                        }
                     }
-                    catch (IOException)
-                    {
-                        break;
-                    }
+                }
+                finally
+                {
+                    OpenNfsServerInstrumentation.ConnectionClosed(OpenNfsTelemetryNames.ListenerNfs42, closeReason, connectionOpenedTimestamp);
                 }
             }
         }

@@ -87,7 +87,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 createResponse =
-                    await _server.Settings.FileSystem.CreateHardLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreateHardLinkAsync(
                         new NfsCreateHardLinkRequest(
                             fileTarget.SourcePath,
                             linkDirectoryTarget.SourcePath,

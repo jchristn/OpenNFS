@@ -66,7 +66,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             if (_server.Capabilities.Delegations is not null && transition.DelegationState is not null)
             {
-                await _server.Capabilities.Delegations.ReturnDelegationAsync(
+                await _server.Capabilities.TrackedDelegations!.ReturnDelegationAsync(
                     new NfsReturnDelegationRequest(
                         refreshedHandle.Target.ExportPath,
                         refreshedHandle.Target.SourcePath,
@@ -123,7 +123,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsAcquireDelegationResponse delegationDecision =
-                await _server.Capabilities.Delegations.AcquireDelegationAsync(
+                await _server.Capabilities.TrackedDelegations!.AcquireDelegationAsync(
                     new NfsAcquireDelegationRequest(
                         openedHandle.Target.ExportPath,
                         openedHandle.Target.SourcePath,

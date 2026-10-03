@@ -75,7 +75,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 createResponse =
-                    await _server.Settings.FileSystem.CreateSymbolicLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreateSymbolicLinkAsync(
                         new NfsCreateSymbolicLinkRequest(
                             directoryTarget.SourcePath,
                             entryName,

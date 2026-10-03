@@ -20,7 +20,8 @@ namespace Sample.OpenNfsServer
             string mappingPath,
             bool denyMounts,
             string? kerberosTargetSpn,
-            string? kerberosKeytab)
+            string? kerberosKeytab,
+            SampleTelemetrySettings telemetry)
         {
             ShowHelp = showHelp;
             ServerName = serverName;
@@ -36,6 +37,7 @@ namespace Sample.OpenNfsServer
             DenyMounts = denyMounts;
             KerberosTargetSpn = kerberosTargetSpn;
             KerberosKeytab = kerberosKeytab;
+            Telemetry = telemetry;
         }
 
         internal bool DenyMounts { get; }
@@ -66,6 +68,8 @@ namespace Sample.OpenNfsServer
 
         internal string? KerberosKeytab { get; }
 
+        internal SampleTelemetrySettings Telemetry { get; }
+
         internal static SampleServerConfiguration Parse(string[] args)
         {
             ArgumentNullException.ThrowIfNull(args);
@@ -86,6 +90,7 @@ namespace Sample.OpenNfsServer
             string? configPath = null;
             string? kerberosTargetSpn = null;
             string? kerberosKeytab = null;
+            SampleTelemetrySettings telemetry = new SampleTelemetrySettings();
 
             for (int index = 0; index < args.Length; index++)
             {
@@ -114,6 +119,7 @@ namespace Sample.OpenNfsServer
                 denyMounts = fileConfiguration.DenyMounts ?? denyMounts;
                 kerberosTargetSpn = fileConfiguration.KerberosTargetSpn ?? kerberosTargetSpn;
                 kerberosKeytab = ResolveConfiguredPath(fileConfiguration.KerberosKeytab, configDirectory) ?? kerberosKeytab;
+                telemetry = fileConfiguration.Telemetry ?? telemetry;
             }
 
             for (int index = 0; index < args.Length; index++)
@@ -182,6 +188,23 @@ namespace Sample.OpenNfsServer
                         kerberosKeytab = ReadRequiredValue(args, ref index, "--kerberos-keytab");
                         break;
 
+                    case "--no-telemetry":
+                        telemetry.Enabled = false;
+                        break;
+
+                    case "--otlp-endpoint":
+                        telemetry.OtlpEndpoint = ReadRequiredValue(args, ref index, "--otlp-endpoint");
+                        break;
+
+                    case "--prometheus-port":
+                        telemetry.PrometheusEnabled = true;
+                        telemetry.PrometheusPort = ParsePort(ReadRequiredValue(args, ref index, "--prometheus-port"), "--prometheus-port");
+                        break;
+
+                    case "--prometheus-host":
+                        telemetry.PrometheusHostname = ReadRequiredValue(args, ref index, "--prometheus-host");
+                        break;
+
                     default:
                         throw new ArgumentException("Unknown Sample.OpenNfsServer argument '" + args[index] + "'.");
                 }
@@ -208,7 +231,8 @@ namespace Sample.OpenNfsServer
                 normalizedMappingPath,
                 denyMounts,
                 kerberosTargetSpn,
-                normalizedKerberosKeytab);
+                normalizedKerberosKeytab,
+                telemetry);
         }
 
         internal static string GetUsage()
@@ -230,6 +254,10 @@ namespace Sample.OpenNfsServer
                 "  --deny-mounts              Deny all mount requests while still starting the sample host.",
                 "  --kerberos-spn <spn>       Optional RPCSEC_GSS Kerberos target SPN (e.g. nfs/sample.example.test@EXAMPLE.TEST).",
                 "  --kerberos-keytab <path>   Optional path to a server keytab. Sets KRB5_KTNAME for the process.",
+                "  --no-telemetry             Do not start the Radiant telemetry host (OTLP export and Prometheus endpoint).",
+                "  --otlp-endpoint <url>      OTLP collector endpoint for traces and metrics. Default: http://127.0.0.1:4317",
+                "  --prometheus-port <port>   Serve Prometheus metrics in-process on this port (enables the endpoint).",
+                "  --prometheus-host <host>   Prometheus endpoint bind host. Default: 127.0.0.1 (use + for all interfaces)",
                 "  --help                     Show this help text.");
         }
 

@@ -63,7 +63,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             }
 
             NfsLookupPathResponse lookupResponse =
-                await _server.Settings.FileSystem.LookupPathAsync(
+                await _server.Settings.InstrumentedFileSystem.LookupPathAsync(
                     new NfsLookupPathRequest(
                         directoryResolution.Target!.SourcePath,
                         entryName,

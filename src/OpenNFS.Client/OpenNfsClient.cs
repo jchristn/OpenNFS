@@ -14,6 +14,7 @@ namespace OpenNFS.Client
     using OpenNFS.Client.Raw;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Rpc.Transport;
 
     /// <summary>
@@ -218,8 +219,18 @@ namespace OpenNFS.Client
         /// <returns>A task that completes when the client lifetime has been opened.</returns>
         public async Task ConnectAsync(CancellationToken cancellationToken)
         {
-            await OpenAsync(cancellationToken).ConfigureAwait(false);
-            await EnsurePortmapperDiscoveryAsync(cancellationToken).ConfigureAwait(false);
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation(nameof(ConnectAsync));
+            try
+            {
+                await OpenAsync(cancellationToken).ConfigureAwait(false);
+                await EnsurePortmapperDiscoveryAsync(cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
         }
 
         /// <summary>
@@ -345,14 +356,25 @@ namespace OpenNFS.Client
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfOperationUnavailable();
 
-            OpenNfsMountV3Result mountResult = await Exports.MountV3Async(safeExportPath, cancellationToken).ConfigureAwait(false);
-
-            if (!mountResult.IsSuccess || mountResult.RootFileHandle.Length == 0)
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation(nameof(MountAsync));
+            try
             {
-                throw new OpenNfsMountV3StatusException(safeExportPath, mountResult.Status);
-            }
+                OpenNfsMountV3Result mountResult = await Exports.MountV3Async(safeExportPath, cancellationToken).ConfigureAwait(false);
 
-            return new OpenNfsMountSession(this, safeExportPath, mountResult.RootFileHandle.ToArray(), ownsMount: true);
+                if (!mountResult.IsSuccess || mountResult.RootFileHandle.Length == 0)
+                {
+                    throw new OpenNfsMountV3StatusException(safeExportPath, mountResult.Status);
+                }
+
+                OpenNfsMountSession session = new OpenNfsMountSession(this, safeExportPath, mountResult.RootFileHandle.ToArray(), ownsMount: true);
+                telemetry?.Succeed();
+                return session;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
         }
 
         /// <summary>

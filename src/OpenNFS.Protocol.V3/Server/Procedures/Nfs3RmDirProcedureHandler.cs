@@ -71,7 +71,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             }
 
             NfsReadDirectoryResponse childDirectoryResponse =
-                await _server.Settings.FileSystem.ReadDirectoryAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                     new NfsReadDirectoryRequest(childPathInfo.Path, cancellationToken)).ConfigureAwait(false);
 
             if (childDirectoryResponse.Entries.Count > 0)
@@ -81,7 +81,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 
             try
             {
-                await _server.Settings.FileSystem.DeletePathAsync(
+                await _server.Settings.InstrumentedFileSystem.DeletePathAsync(
                     new NfsDeletePathRequest(
                         directoryResolution.Target!.SourcePath,
                         entryName,

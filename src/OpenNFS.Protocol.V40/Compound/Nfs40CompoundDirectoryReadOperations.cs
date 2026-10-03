@@ -58,7 +58,7 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsReadDirectoryResponse directoryResponse =
-                await _server.Settings.FileSystem.ReadDirectoryAsync(
+                await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                     new NfsReadDirectoryRequest(
                         refreshedHandle.Target.SourcePath,
                         cancellationToken)).ConfigureAwait(false);

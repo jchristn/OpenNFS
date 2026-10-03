@@ -79,7 +79,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             try
             {
-                await _server.Settings.FileSystem.DeletePathAsync(
+                await _server.Settings.InstrumentedFileSystem.DeletePathAsync(
                     new NfsDeletePathRequest(
                         refreshedDirectory.Target.SourcePath,
                         entryName,
@@ -233,7 +233,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 if (destinationIsDirectory)
                 {
                     NfsReadDirectoryResponse destinationDirectoryResponse =
-                        await _server.Settings.FileSystem.ReadDirectoryAsync(
+                        await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                             new NfsReadDirectoryRequest(destinationChildPathInfo.Path, cancellationToken)).ConfigureAwait(false);
                     if (destinationDirectoryResponse.Entries.Count > 0)
                     {
@@ -247,7 +247,7 @@ namespace OpenNFS.Protocol.V40.Compound
 
             try
             {
-                await _server.Settings.FileSystem.RenamePathAsync(
+                await _server.Settings.InstrumentedFileSystem.RenamePathAsync(
                     new NfsRenamePathRequest(
                         refreshedSourceDirectory.Target.SourcePath,
                         oldName,

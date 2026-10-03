@@ -3,6 +3,7 @@ namespace OpenNFS.Server
     using System;
     using System.Collections.Generic;
     using OpenNFS.Server.Abstractions.Capabilities;
+    using OpenNFS.Server.Internal.Telemetry;
 
     /// <summary>
     /// Immutable catalog of optional host capabilities exposed by a configured server.
@@ -10,6 +11,13 @@ namespace OpenNFS.Server
     public sealed class NfsServerCapabilities
     {
         private readonly NfsCapabilityKind[] _AdvertisedCapabilities;
+        private INfsLocking? _TrackedLocking;
+        private INfsAcls? _TrackedAcls;
+        private INfsDelegations? _TrackedDelegations;
+        private INfsCopyClone? _TrackedCopyClone;
+        private INfsSparse? _TrackedSparse;
+        private INfsIdMapper? _TrackedIdMapper;
+        private INfsAttributeMutation? _TrackedAttributeMutation;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="NfsServerCapabilities"/> class.
@@ -100,6 +108,20 @@ namespace OpenNFS.Server
         /// Gets the configured attribute-mutation (SETATTR size, timestamps, and mode) capability contract, if one is available.
         /// </summary>
         public INfsAttributeMutation? AttributeMutation { get; }
+
+        internal INfsLocking? TrackedLocking => _TrackedLocking ??= Locking is null ? null : new TelemetryNfsLocking(Locking);
+
+        internal INfsAcls? TrackedAcls => _TrackedAcls ??= Acls is null ? null : new TelemetryNfsAcls(Acls);
+
+        internal INfsDelegations? TrackedDelegations => _TrackedDelegations ??= Delegations is null ? null : new TelemetryNfsDelegations(Delegations);
+
+        internal INfsCopyClone? TrackedCopyClone => _TrackedCopyClone ??= CopyClone is null ? null : new TelemetryNfsCopyClone(CopyClone);
+
+        internal INfsSparse? TrackedSparse => _TrackedSparse ??= Sparse is null ? null : new TelemetryNfsSparse(Sparse);
+
+        internal INfsIdMapper? TrackedIdMapper => _TrackedIdMapper ??= IdMapper is null ? null : new TelemetryNfsIdMapper(IdMapper);
+
+        internal INfsAttributeMutation? TrackedAttributeMutation => _TrackedAttributeMutation ??= AttributeMutation is null ? null : new TelemetryNfsAttributeMutation(AttributeMutation);
 
         /// <summary>
         /// Gets the ordered list of advertised optional capabilities.

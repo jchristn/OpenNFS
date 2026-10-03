@@ -63,7 +63,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 return CreateFailureResult(nfsstat3.NFS3ERR_INVAL, currentWcc);
             }
 
-            INfsAttributeMutation? attributeMutation = _server.Capabilities.AttributeMutation;
+            INfsAttributeMutation? attributeMutation = _server.Capabilities.TrackedAttributeMutation;
             NfsPathInfo afterPathInfo;
 
             if (attributeMutation is null)
@@ -90,7 +90,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 }
 
                 NfsGetPathInfoResponse afterPathInfoResponse =
-                    await _server.Settings.FileSystem.GetPathInfoAsync(
+                    await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                         new NfsGetPathInfoRequest(
                             resolution.Target!.SourcePath,
                             cancellationToken)).ConfigureAwait(false);

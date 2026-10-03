@@ -90,7 +90,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 reclaim: false,
                 cancellationToken);
             NfsLockResponse response =
-                await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
+                await _server.Capabilities.TrackedLocking!.ProcessLockAsync(request).ConfigureAwait(false);
             return CreateLockTestResult(
                 MapLockDisposition(response.Disposition),
                 deniedPayload: response.Disposition == NfsLockDisposition.Denied

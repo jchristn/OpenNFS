@@ -40,7 +40,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 readResponse =
-                    await _server.Settings.FileSystem.ReadSymbolicLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.ReadSymbolicLinkAsync(
                         new NfsReadSymbolicLinkRequest(
                             resolution.Target!.SourcePath,
                             cancellationToken)).ConfigureAwait(false);

@@ -6,7 +6,7 @@ OpenNFS is a native C# implementation effort for ONC RPC and NFS. Current scope,
 
 OpenNFS is an ALPHA repository.
 
-- The current package/version line is `v0.1.1`, but that is not a stability or support claim.
+- The current package/version line is `v0.2.0`, but that is not a stability or support claim.
 - Public APIs, runtime behavior, interoperability coverage, CI workflows, and documentation are all subject to change without notice.
 - Only very limited compatibility testing has been done relative to the eventual support bar. Passing local suites, direct-peer tests, Linux peer checks, or archived subset conformance runs does not imply broad protocol, platform, kernel, or client/server compatibility.
 
@@ -73,6 +73,9 @@ RDMA remains out of scope for the current release line and may be evaluated as a
 .
 |-- .github/
 |   `-- workflows/
+|-- assets/
+|   `-- grafana/          (OpenNFS Grafana dashboards)
+|-- docker/               (sample server + OpenTelemetry Collector, Prometheus, Tempo, Grafana)
 |-- docs/
 |-- scripts/
 |-- specs/
@@ -99,7 +102,8 @@ RDMA remains out of scope for the current release line and may be evaluated as a
 |   `-- Test.Xunit/
 |-- CHANGELOG.md
 |-- LICENSE.md
-`-- README.md
+|-- README.md
+`-- TELEMETRY.md
 ```
 
 ## Build and validation
@@ -674,6 +678,33 @@ docker compose down            # stop, keep DB + keytabs
 docker compose down -v         # stop + drop the DB (next start re-creates principals)
 rm -f keytabs/*.keytab         # drop keytabs only
 ```
+
+## Observability
+
+OpenNFS emits metrics and traces so an operator can see where time went and what failed: per-procedure RPC latency and status, per-stage timing (RPCSEC_GSS, duplicate-request cache, handler, reply write), every NFSv4.x COMPOUND operation, every call into the host file system and capabilities, connections, NFSv4 state (clients, opens, locks, delegations, leases, sessions), and on the client side logical RPC calls, retries, transport attempts, the connection pool, and mounted-session operations.
+
+The packages emit only through the .NET base class library (`Meter` and `ActivitySource` named `OpenNFS.Server` and `OpenNFS.Client`) and take no new dependency. Nothing is exported until your host subscribes, and an unobserved instrument costs a few nanoseconds. Subscribe with any OpenTelemetry-compatible host, for example Radiant:
+
+```csharp
+using OpenNFS.Telemetry;
+using Radiant;
+
+RadiantSettings settings = new RadiantSettings("my-nfs-service");
+settings.Otlp.Endpoint = "http://127.0.0.1:4317";
+settings.Sources.AddMeter(OpenNfsTelemetryNames.ServerMeterName);
+settings.Sources.AddActivitySource(OpenNfsTelemetryNames.ServerActivitySourceName);
+settings.Sources.AddMeter(OpenNfsTelemetryNames.ClientMeterName);
+settings.Sources.AddActivitySource(OpenNfsTelemetryNames.ClientActivitySourceName);
+using RadiantHost host = RadiantHost.Start(settings);
+```
+
+`Sample.OpenNfsServer` already hosts Radiant (configure it with the `telemetry` section of its JSON config or `--otlp-endpoint`, `--prometheus-port`, `--no-telemetry`). To see everything in Grafana:
+
+```
+docker compose -f docker/compose.yaml up -d --build
+```
+
+This builds the sample server and starts an OpenTelemetry Collector, Prometheus, Tempo, and Grafana (`http://localhost:3000`, `admin` / `admin` by default; change it outside local development) with five provisioned dashboards in the `OpenNFS` folder: Overview, Server RPC, NFSv4 and State, Backends and Integrations, and Client. [TELEMETRY.md](./TELEMETRY.md) documents every metric, span, label value, configuration key, recommended alert, and the dashboard map.
 
 ## Packaging
 

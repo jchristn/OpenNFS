@@ -20,7 +20,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             cancellationToken.ThrowIfCancellationRequested();
 
             NfsGetPathInfoResponse pathInfoResponse =
-                await server.Settings.FileSystem.GetPathInfoAsync(
+                await server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(sourcePath, cancellationToken)).ConfigureAwait(false);
 
             return pathInfoResponse.PathInfo;
@@ -38,7 +38,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             cancellationToken.ThrowIfCancellationRequested();
 
             NfsLookupPathResponse lookupResponse =
-                await server.Settings.FileSystem.LookupPathAsync(
+                await server.Settings.InstrumentedFileSystem.LookupPathAsync(
                     new NfsLookupPathRequest(
                         directoryTarget.SourcePath,
                         entryName,
@@ -108,7 +108,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             uint mode = (requestedAttributes.mode.mode?.Value?.Value ?? 0U) & 0xFFFU;
             try
             {
-                NfsSetAttributesResponse response = await server.Capabilities.AttributeMutation.SetAttributesAsync(
+                NfsSetAttributesResponse response = await server.Capabilities.TrackedAttributeMutation!.SetAttributesAsync(
                     new NfsSetAttributesRequest(
                         createdPathInfo.Path,
                         createdPathInfo.Kind,

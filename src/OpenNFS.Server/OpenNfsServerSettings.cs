@@ -5,6 +5,7 @@ namespace OpenNFS.Server
     using OpenNFS.Server.Abstractions;
     using OpenNFS.Server.Abstractions.Capabilities;
     using OpenNFS.Server.Internal;
+    using OpenNFS.Server.Internal.Telemetry;
 
     /// <summary>
     /// Immutable settings for configuring an OpenNFS server host surface.
@@ -110,6 +111,7 @@ namespace OpenNFS.Server
             }
 
             FileSystem = fileSystem;
+            InstrumentedFileSystem = new TelemetryNfsFileSystem(fileSystem);
             ServerName = serverName;
             ListenerAddress = listenerAddress;
             ListenerPort = listenerPort;
@@ -117,6 +119,7 @@ namespace OpenNFS.Server
             MaximumConnections = maximumConnections;
             ExportProvider = exportProvider ?? EmptyNfsExportProvider.Instance;
             MountAuthorization = mountAuthorization ?? AllowAllNfsMountAuthorization.Instance;
+            InstrumentedMountAuthorization = new TelemetryNfsMountAuthorization(MountAuthorization);
             FileHandleProvider = fileHandleProvider ?? FileHandles.IntrinsicHandleProvider.Default;
             Capabilities = new NfsServerCapabilities(
                 locking,
@@ -182,6 +185,10 @@ namespace OpenNFS.Server
         /// Gets the configured file system contract.
         /// </summary>
         public INfsFileSystem FileSystem { get; }
+
+        internal INfsFileSystem InstrumentedFileSystem { get; }
+
+        internal INfsMountAuthorization InstrumentedMountAuthorization { get; }
 
         /// <summary>
         /// Gets the configured display name for the server.

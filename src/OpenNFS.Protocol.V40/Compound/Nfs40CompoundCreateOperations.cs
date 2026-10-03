@@ -131,7 +131,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 NfsCreatePathResponse createDirectoryResponse =
-                    await _server.Settings.FileSystem.CreatePathAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreatePathAsync(
                         new NfsCreatePathRequest(
                             refreshedDirectory.Target.SourcePath,
                             entryName,
@@ -196,7 +196,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 NfsCreateSymbolicLinkResponse createLinkResponse =
-                    await _server.Settings.FileSystem.CreateSymbolicLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreateSymbolicLinkAsync(
                         new NfsCreateSymbolicLinkRequest(
                             refreshedDirectory.Target.SourcePath,
                             entryName,

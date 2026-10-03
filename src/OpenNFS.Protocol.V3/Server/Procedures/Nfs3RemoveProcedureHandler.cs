@@ -72,7 +72,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 
             try
             {
-                await _server.Settings.FileSystem.DeletePathAsync(
+                await _server.Settings.InstrumentedFileSystem.DeletePathAsync(
                     new NfsDeletePathRequest(
                         directoryResolution.Target!.SourcePath,
                         entryName,

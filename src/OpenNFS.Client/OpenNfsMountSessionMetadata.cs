@@ -4,6 +4,8 @@ namespace OpenNFS.Client
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Client.Internal;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Provides path-first metadata helpers over an <see cref="OpenNfsMountSession"/>.
@@ -26,6 +28,22 @@ namespace OpenNFS.Client
         /// <param name="cancellationToken">Cancellation token for the attribute read.</param>
         /// <returns>The decoded NFSv3 attributes.</returns>
         public async Task<OpenNfsV3Attributes> GetAttributesAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("GetAttributesAsync");
+            try
+            {
+                OpenNfsV3Attributes result = await GetAttributesCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<OpenNfsV3Attributes> GetAttributesCoreAsync(string path, CancellationToken cancellationToken)
         {
             byte[] fileHandle = await _session.ResolvePathHandleOrThrowAsync(path, "Mounted-session attribute read", cancellationToken).ConfigureAwait(false);
             OpenNfsV3GetAttributesResult result =
@@ -50,6 +68,22 @@ namespace OpenNFS.Client
         /// </returns>
         /// <exception cref="OpenNfsV3StatusException">Thrown for any other failure status (for example access denied or a stale handle).</exception>
         public async Task<bool> ExistsAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("ExistsAsync");
+            try
+            {
+                bool result = await ExistsCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<bool> ExistsCoreAsync(string path, CancellationToken cancellationToken)
         {
             OpenNfsMountSessionResolution resolution = await _session.ResolvePathAsync(path, cancellationToken).ConfigureAwait(false);
             switch (resolution.Status)
@@ -77,6 +111,21 @@ namespace OpenNFS.Client
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved or the server rejects the size change.</exception>
         public async Task SetLengthAsync(string path, ulong length, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("SetLengthAsync");
+            try
+            {
+                await SetLengthCoreAsync(path, length, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task SetLengthCoreAsync(string path, ulong length, CancellationToken cancellationToken)
+        {
             byte[] fileHandle = await _session.ResolvePathHandleOrThrowAsync(path, SetAttributesOperationName, cancellationToken).ConfigureAwait(false);
             await SetAttributesAsync(fileHandle, path, new OpenNfsV3SetAttributes(sizeBytes: length), cancellationToken).ConfigureAwait(false);
         }
@@ -97,6 +146,21 @@ namespace OpenNFS.Client
         /// <exception cref="ArgumentOutOfRangeException">Thrown when a timestamp is outside the NFSv3 representable range.</exception>
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved or the server rejects the change.</exception>
         public async Task SetTimesAsync(string path, DateTime? accessTimeUtc, DateTime? modifyTimeUtc, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("SetTimesAsync");
+            try
+            {
+                await SetTimesCoreAsync(path, accessTimeUtc, modifyTimeUtc, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task SetTimesCoreAsync(string path, DateTime? accessTimeUtc, DateTime? modifyTimeUtc, CancellationToken cancellationToken)
         {
             OpenNfsV3Time? accessTime = accessTimeUtc.HasValue ? OpenNfsV3Time.FromDateTimeUtc(accessTimeUtc.Value) : null;
             OpenNfsV3Time? modifyTime = modifyTimeUtc.HasValue ? OpenNfsV3Time.FromDateTimeUtc(modifyTimeUtc.Value) : null;

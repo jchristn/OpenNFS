@@ -146,7 +146,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             }
 
             NfsGetPathInfoResponse? pathInfoResponse =
-                await server.Settings.FileSystem.GetPathInfoAsync(
+                await server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(
                         resolution.Target.SourcePath,
                         cancellationToken)).ConfigureAwait(false);

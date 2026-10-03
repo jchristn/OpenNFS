@@ -10,6 +10,7 @@ namespace OpenNFS.Protocol.V3.Nlm
     using OpenNFS.Protocol.V3.Nlm.LockAdapters;
     using OpenNFS.Protocol.V3.Nsm;
     using OpenNFS.Protocol.V3.Server.Procedures;
+    using OpenNFS.Protocol.V3.Telemetry;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
     using OpenNFS.Rpc.Xdr;
@@ -33,7 +34,7 @@ namespace OpenNFS.Protocol.V3.Nlm
         {
             ArgumentNullException.ThrowIfNull(server);
             _server = server;
-            _grantedCallbackDispatcher = grantedCallbackDispatcher ?? NoOpNlmV4GrantedCallbackDispatcher.Instance;
+            _grantedCallbackDispatcher = new TelemetryNlmV4GrantedCallbackDispatcher(grantedCallbackDispatcher ?? NoOpNlmV4GrantedCallbackDispatcher.Instance);
             _recoveryCoordinator = recoveryCoordinator ?? new NsmRecoveryCoordinator();
             _pendingBlockedLocks = new List<PendingBlockedLock>();
             _syncRoot = new object();
@@ -184,7 +185,7 @@ namespace OpenNFS.Protocol.V3.Nlm
                 return errorReply!;
             }
 
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -309,7 +310,7 @@ namespace OpenNFS.Protocol.V3.Nlm
                 return errorReply!;
             }
 
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -448,7 +449,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             NfsLockOperation operation,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -522,7 +523,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             NfsLockOperation operation,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -604,7 +605,7 @@ namespace OpenNFS.Protocol.V3.Nlm
 
             NfsFileHandleTarget target = resolution.Target;
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             if (!pathInfoResponse.PathInfo.Exists)

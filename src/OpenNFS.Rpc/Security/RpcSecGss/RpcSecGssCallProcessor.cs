@@ -1,11 +1,14 @@
 namespace OpenNFS.Rpc.Security.RpcSecGss
 {
     using System;
+    using System.Diagnostics;
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Rpc.Xdr;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Centralizes the RPCSEC_GSS credential processing path that every v3-era ONC RPC dispatcher
@@ -26,7 +29,7 @@ namespace OpenNFS.Rpc.Security.RpcSecGss
         /// <param name="mechanism">The registered mechanism, or <c>null</c> when none is configured.</param>
         /// <param name="cancellationToken">A token used to cancel the operation.</param>
         /// <returns>The disposition.</returns>
-        public static async Task<RpcSecGssCallDisposition> ProcessAsync(
+        public static Task<RpcSecGssCallDisposition> ProcessAsync(
             RpcMessageEnvelope request,
             RpcSecGssAuthenticator authenticator,
             IRpcSecGssMechanism? mechanism,
@@ -35,6 +38,57 @@ namespace OpenNFS.Rpc.Security.RpcSecGss
             ArgumentNullException.ThrowIfNull(request);
             ArgumentNullException.ThrowIfNull(authenticator);
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (request.Header.body?.cbody?.cred?.flavor != auth_flavor.RPCSEC_GSS)
+            {
+                return ProcessCoreAsync(request, authenticator, mechanism, cancellationToken);
+            }
+
+            return ProcessObservedAsync(request, authenticator, mechanism, cancellationToken);
+        }
+
+        private static async Task<RpcSecGssCallDisposition> ProcessObservedAsync(
+            RpcMessageEnvelope request,
+            RpcSecGssAuthenticator authenticator,
+            IRpcSecGssMechanism? mechanism,
+            CancellationToken cancellationToken)
+        {
+            Activity? activity = OpenNfsServerInstrumentation.StartStageActivity(OpenNfsTelemetryNames.StageAuth);
+            try
+            {
+                RpcSecGssCallDisposition disposition = await ProcessCoreAsync(request, authenticator, mechanism, cancellationToken).ConfigureAwait(false);
+                string procedure = disposition.ContinueProcessing ? OpenNfsTelemetryNames.GssProcedureData : OpenNfsTelemetryNames.GssProcedureControl;
+                string result = disposition.ContinueProcessing
+                    ? OpenNfsTelemetryNames.ResultAccepted
+                    : disposition.Reply?.Header.body?.rbody?.stat == reply_stat.MSG_DENIED ? OpenNfsTelemetryNames.ResultRejected : OpenNfsTelemetryNames.ResultCompleted;
+                OpenNfsServerInstrumentation.RecordRpcSecGss(procedure, result);
+                if (activity is not null)
+                {
+                    activity.SetTag(OpenNfsTelemetryNames.AttributeGssProcedure, procedure);
+                    activity.SetTag(OpenNfsTelemetryNames.AttributeResult, result);
+                    activity.SetStatus(result == OpenNfsTelemetryNames.ResultRejected ? ActivityStatusCode.Error : ActivityStatusCode.Ok, result == OpenNfsTelemetryNames.ResultRejected ? "AUTH_ERROR" : null);
+                }
+
+                return disposition;
+            }
+            catch (Exception exception)
+            {
+                OpenNfsServerInstrumentation.RecordRpcSecGss(OpenNfsTelemetryNames.ValueUnknown, OpenNfsTelemetryNames.ResultError);
+                OpenNfsTelemetryErrors.MarkFailed(activity, exception, OpenNfsTelemetryErrors.GetErrorType(exception));
+                throw;
+            }
+            finally
+            {
+                OpenNfsTelemetryErrors.EndActivity(activity);
+            }
+        }
+
+        private static async Task<RpcSecGssCallDisposition> ProcessCoreAsync(
+            RpcMessageEnvelope request,
+            RpcSecGssAuthenticator authenticator,
+            IRpcSecGssMechanism? mechanism,
+            CancellationToken cancellationToken)
+        {
 
             opaque_auth? credential = request.Header.body?.cbody?.cred;
             if (credential is null)
@@ -113,9 +167,12 @@ namespace OpenNFS.Rpc.Security.RpcSecGss
             opaque_auth? verifier = request.Header.body?.cbody?.verf;
             byte[] inboundToken = ExtractInitToken(request.ProcedurePayload);
 
-            RpcSecGssAcceptResult acceptResult = await mechanism
-                .AcceptSecurityContextAsync(body.ContextHandle, inboundToken, cancellationToken)
-                .ConfigureAwait(false);
+            RpcSecGssAcceptResult acceptResult = await OpenNfsServerInstrumentation.TrackBackendValueAsync(
+                OpenNfsTelemetryNames.CapabilityGssMechanism,
+                "accept_security_context",
+                mechanism,
+                inboundToken,
+                (host, token) => host.AcceptSecurityContextAsync(body.ContextHandle, token, cancellationToken)).ConfigureAwait(false);
 
             RpcSecGssInitResult result = new RpcSecGssInitResult(
                 contextHandle: acceptResult.ContextHandle,

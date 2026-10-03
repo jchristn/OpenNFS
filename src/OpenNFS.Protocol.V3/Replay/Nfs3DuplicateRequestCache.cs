@@ -4,15 +4,19 @@ namespace OpenNFS.Protocol.V3.Replay
     using System.Buffers.Binary;
     using System.IO;
     using System.Security.Cryptography;
+    using System.Threading;
     using OpenNFS.Protocol.V3.Generated;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.Replay;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     internal sealed class Nfs3DuplicateRequestCache
     {
         private readonly RpcReplayCache<RpcRequestCorrelationKey, ReplayEntry> _cache;
         private readonly Func<DateTimeOffset> _utcNow;
+        private long _reportedEntryCount;
 
         internal Nfs3DuplicateRequestCache(
             TimeSpan? entryLifetime = null,
@@ -34,18 +38,23 @@ namespace OpenNFS.Protocol.V3.Replay
             }
 
             byte[] requestFingerprint = CreateRequestFingerprint(request);
-            if (!_cache.TryGet(key, _utcNow(), out ReplayEntry? replayEntry) || replayEntry is null)
+            bool found = _cache.TryGet(key, _utcNow(), out ReplayEntry? replayEntry);
+            ReportEntryCount();
+            if (!found || replayEntry is null)
             {
+                OpenNfsServerInstrumentation.RecordReplayLookup(OpenNfsTelemetryNames.CacheNfs3DuplicateRequest, OpenNfsTelemetryNames.ResultMiss);
                 reply = null;
                 return false;
             }
 
             if (!replayEntry.RequestFingerprint.Span.SequenceEqual(requestFingerprint))
             {
+                OpenNfsServerInstrumentation.RecordReplayLookup(OpenNfsTelemetryNames.CacheNfs3DuplicateRequest, OpenNfsTelemetryNames.ResultMismatch);
                 reply = null;
                 return false;
             }
 
+            OpenNfsServerInstrumentation.RecordReplayLookup(OpenNfsTelemetryNames.CacheNfs3DuplicateRequest, OpenNfsTelemetryNames.ResultHit);
             reply = RpcMessageCodec.Decode(replayEntry.ReplyBytes);
             return true;
         }
@@ -65,6 +74,14 @@ namespace OpenNFS.Protocol.V3.Replay
                 key,
                 new ReplayEntry(CreateRequestFingerprint(request), RpcMessageCodec.Encode(reply)),
                 _utcNow());
+            ReportEntryCount();
+        }
+
+        private void ReportEntryCount()
+        {
+            long current = _cache.Count;
+            long previous = Interlocked.Exchange(ref _reportedEntryCount, current);
+            OpenNfsServerInstrumentation.AdjustReplayEntries(OpenNfsTelemetryNames.CacheNfs3DuplicateRequest, current - previous);
         }
 
         private static void AppendBuffer(IncrementalHash hash, ReadOnlySpan<byte> value)

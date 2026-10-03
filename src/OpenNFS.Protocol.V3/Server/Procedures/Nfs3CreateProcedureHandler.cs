@@ -96,7 +96,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 createResponse =
-                    await _server.Settings.FileSystem.CreatePathAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreatePathAsync(
                         new NfsCreatePathRequest(
                             directoryTarget.SourcePath,
                             entryName,

@@ -94,7 +94,7 @@ namespace OpenNFS.Protocol.V40.Compound
                 reclaim: false,
                 cancellationToken);
             NfsLockResponse response =
-                await _server.Capabilities.Locking.ProcessLockAsync(request).ConfigureAwait(false);
+                await _server.Capabilities.TrackedLocking!.ProcessLockAsync(request).ConfigureAwait(false);
             if (response.Disposition != NfsLockDisposition.Granted)
             {
                 return CreateLockUnlockResult(MapLockDisposition(response.Disposition));

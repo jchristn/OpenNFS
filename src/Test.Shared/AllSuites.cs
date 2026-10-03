@@ -42,7 +42,8 @@ namespace Test.Shared
                     ClientRawSuites.Create(),
                     ClientGroupedSuites.Create(),
                     MountSessionSuites.Create(),
-                    InteropMountSessionSuites.Create()
+                    InteropMountSessionSuites.Create(),
+                    TelemetrySuites.Create()
                 };
             }
         }

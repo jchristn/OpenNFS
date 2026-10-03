@@ -58,7 +58,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
             try
             {
                 commitResponse =
-                    await _server.Settings.FileSystem.CommitFileAsync(
+                    await _server.Settings.InstrumentedFileSystem.CommitFileAsync(
                         new NfsCommitFileRequest(
                             resolution.Target!.SourcePath,
                             offset,

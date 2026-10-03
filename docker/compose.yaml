@@ -1,0 +1,137 @@
+# OpenNFS sample server plus its observability stack.
+#
+#   docker compose -f docker/compose.yaml up -d --build
+#
+# Grafana     http://localhost:3000   (admin / admin by default; override GRAFANA_ADMIN_USER / GRAFANA_ADMIN_PASSWORD)
+# Prometheus  http://localhost:9090
+# Tempo       http://localhost:3200
+# Collector   OTLP gRPC localhost:4317, OTLP HTTP localhost:4318 (host applications can export here too)
+# OpenNFS     NFSv3 2049, MOUNT v3 20048, NFSv4.0 3049
+#
+# Telemetry path: the sample server's Radiant host pushes traces and metrics over OTLP to the OpenTelemetry Collector,
+# which forwards traces to Tempo and exposes metrics for Prometheus to scrape. The sample also serves Radiant's
+# Prometheus endpoint on container loopback (127.0.0.1:9464) purely for its healthcheck.
+#
+# Every published host port can be overridden with an environment variable (OPENNFS_NFS_PORT, OPENNFS_MOUNT_PORT,
+# OPENNFS_NFS40_PORT, OTLP_GRPC_PORT, OTLP_HTTP_PORT, PROMETHEUS_PORT, TEMPO_PORT, GRAFANA_PORT) when another stack
+# already owns the default.
+#
+# The defaults are local-development defaults. Change the Grafana credentials and keep Prometheus, Tempo, and the
+# metrics port off public interfaces for any shared or hosted deployment (see TELEMETRY.md).
+#
+# Loki is intentionally not part of this stack: the OpenNFS server is request-driven and runs no background
+# pipelines or schedulers, so traces and metrics carry everything an operator needs.
+
+name: opennfs
+
+services:
+  opennfs-sample-server:
+    container_name: 'opennfs-sample-server'
+    build:
+      context: ..
+      dockerfile: docker/sample-server/Dockerfile
+    image: 'opennfs-sample-server:local'
+    ports:
+      - '${OPENNFS_NFS_PORT:-2049}:2049'
+      - '${OPENNFS_MOUNT_PORT:-20048}:20048'
+      - '${OPENNFS_NFS40_PORT:-3049}:3049'
+    volumes:
+      - opennfs-data:/data
+    depends_on:
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://127.0.0.1:9464/metrics']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 20s
+
+  prometheus:
+    container_name: 'opennfs-prometheus'
+    image: 'prom/prometheus:v3.5.4'
+    ports:
+      - '${PROMETHEUS_PORT:-9090}:9090'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - opennfs-prometheus-data:/prometheus
+    depends_on:
+      otel-collector:
+        condition: service_started
+      opennfs-sample-server:
+        condition: service_healthy
+    healthcheck:
+      # The prometheus image ships wget (not curl); /-/healthy returns 200 when ready.
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 20s
+
+  otel-collector:
+    container_name: 'opennfs-otel-collector'
+    # The contrib image is distroless (no shell, curl, or wget), so it has no Docker healthcheck; dependents wait
+    # for service_started and Tempo is healthy before the collector starts.
+    image: 'otel/opentelemetry-collector-contrib:0.109.0'
+    command: ['--config=/etc/otel-collector.yaml']
+    ports:
+      - '${OTLP_GRPC_PORT:-4317}:4317'
+      - '${OTLP_HTTP_PORT:-4318}:4318'
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    depends_on:
+      tempo:
+        condition: service_healthy
+
+  tempo:
+    container_name: 'opennfs-tempo'
+    # Pinned: later Tempo builds reject the standard ingester/compactor sections used here.
+    image: 'grafana/tempo:2.6.1'
+    command: ['-config.file=/etc/tempo.yaml']
+    ports:
+      - '${TEMPO_PORT:-3200}:3200'
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - opennfs-tempo-data:/var/tempo
+    healthcheck:
+      # The tempo image ships wget (not curl); /ready returns 503 until fully ready, then 200.
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3200/ready || exit 1']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 40s
+
+  grafana:
+    container_name: 'opennfs-grafana'
+    image: 'grafana/grafana-oss:13.0.2'
+    ports:
+      - '${GRAFANA_PORT:-3000}:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: '${GRAFANA_ADMIN_USER:-admin}'
+      GF_SECURITY_ADMIN_PASSWORD: '${GRAFANA_ADMIN_PASSWORD:-admin}'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - opennfs-grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../assets/grafana:/var/lib/grafana/dashboards/opennfs:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3000/api/health || exit 1']
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 30s
+
+volumes:
+  opennfs-data:
+  opennfs-prometheus-data:
+  opennfs-tempo-data:
+  opennfs-grafana-data:

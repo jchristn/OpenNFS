@@ -109,7 +109,7 @@ namespace OpenNFS.Protocol.V40.Compound
             try
             {
                 NfsCreateHardLinkResponse createResponse =
-                    await _server.Settings.FileSystem.CreateHardLinkAsync(
+                    await _server.Settings.InstrumentedFileSystem.CreateHardLinkAsync(
                         new NfsCreateHardLinkRequest(
                             refreshedSource.Target.SourcePath,
                             refreshedDirectory.Target.SourcePath,

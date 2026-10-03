@@ -136,7 +136,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
                 if (toChildPathInfo.Kind == NfsPathKind.Directory)
                 {
                     NfsReadDirectoryResponse destinationDirectoryResponse =
-                        await _server.Settings.FileSystem.ReadDirectoryAsync(
+                        await _server.Settings.InstrumentedFileSystem.ReadDirectoryAsync(
                             new NfsReadDirectoryRequest(toChildPathInfo.Path, cancellationToken)).ConfigureAwait(false);
 
                     if (destinationDirectoryResponse.Entries.Count > 0)
@@ -148,7 +148,7 @@ namespace OpenNFS.Protocol.V3.Server.Procedures
 
             try
             {
-                await _server.Settings.FileSystem.RenamePathAsync(
+                await _server.Settings.InstrumentedFileSystem.RenamePathAsync(
                     new NfsRenamePathRequest(
                         fromDirectoryTarget.SourcePath,
                         fromEntryName,

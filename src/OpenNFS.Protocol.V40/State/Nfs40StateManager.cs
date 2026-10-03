@@ -5,10 +5,11 @@ namespace OpenNFS.Protocol.V40.State
     using System.Collections.Generic;
     using System.Security.Cryptography;
     using OpenNFS.Protocol.V40.Generated;
+    using OpenNFS.Rpc.Telemetry;
     using OpenNFS.Server;
     using OpenNFS.Server.Delegations;
 
-    internal sealed class Nfs40StateManager
+    internal sealed class Nfs40StateManager : IOpenNfsServerStateSource
     {
         private readonly Func<DateTimeOffset> _utcNow;
         private readonly TimeSpan _gracePeriodDuration;
@@ -67,6 +68,7 @@ namespace OpenNFS.Protocol.V40.State
             _validation = new Nfs40StateValidationSupport(this);
             _openOperations = new Nfs40StateOpenOperations(this);
             _lockOperations = new Nfs40StateLockOperations(this);
+            OpenNfsServerInstrumentation.StateSources.Register(this);
         }
 
         internal Nfs40ClientRegistry Clients => _clients;
@@ -198,6 +200,22 @@ namespace OpenNFS.Protocol.V40.State
 
                 record.LastRenewUtc = now;
                 return nfsstat4.NFS4_OK;
+            }
+        }
+
+        void IOpenNfsServerStateSource.ReadState(OpenNfsServerStateCounts counts)
+        {
+            DateTimeOffset now = GetUtcNow();
+            lock (_syncRoot)
+            {
+                counts.Nfs4Clients += _clientsById.Count;
+                counts.Nfs4Opens += _statesByToken.Count;
+                counts.Nfs4Locks += _lockStatesByToken.Count;
+                counts.Nfs4Delegations += _delegationStatesByToken.Count;
+                if (IsGracePeriodActiveUnlocked(now))
+                {
+                    counts.Nfs4GracePeriodsActive += 1;
+                }
             }
         }
 
@@ -1408,6 +1426,8 @@ namespace OpenNFS.Protocol.V40.State
             {
                 RemoveClientUnlocked(expiredClients[index]);
             }
+
+            OpenNfsServerInstrumentation.RecordLeaseExpirations(expiredClients.Count);
         }
 
         private nfsstat4 ValidateOpenUnlocked(

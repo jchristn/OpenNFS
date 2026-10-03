@@ -36,7 +36,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             nlm4_testargs arguments,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -83,7 +83,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             nlm4_testargs arguments,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -123,7 +123,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             NfsLockOperation operation,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -197,7 +197,7 @@ namespace OpenNFS.Protocol.V3.Nlm
             NfsLockOperation operation,
             CancellationToken cancellationToken)
         {
-            INfsLocking? locking = _server.Capabilities.Locking;
+            INfsLocking? locking = _server.Capabilities.TrackedLocking;
             if (locking is null)
             {
                 return RpcMessageFactory.CreateAcceptedReply(
@@ -302,7 +302,7 @@ namespace OpenNFS.Protocol.V3.Nlm
 
             NfsFileHandleTarget target = resolution.Target;
             NfsGetPathInfoResponse pathInfoResponse =
-                await _server.Settings.FileSystem.GetPathInfoAsync(
+                await _server.Settings.InstrumentedFileSystem.GetPathInfoAsync(
                     new NfsGetPathInfoRequest(target.SourcePath, cancellationToken)).ConfigureAwait(false);
 
             if (!pathInfoResponse.PathInfo.Exists)

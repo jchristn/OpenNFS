@@ -9,6 +9,8 @@ namespace OpenNFS.Client.Internal
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RecordMarking;
     using OpenNFS.Rpc.RpcMessages;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// One persistent TCP connection that multiplexes many outstanding ONC RPC calls.
@@ -38,6 +40,7 @@ namespace OpenNFS.Client.Internal
         private readonly SemaphoreSlim _writeGate = new SemaphoreSlim(1, 1);
         private long _lastActivityTicks;
         private long _lastReceiveTicks;
+        private string _retireReason = OpenNfsTelemetryNames.ReasonRetired;
         private int _state;
 
         private OpenNfsPooledRpcConnection(OpenNfsEndpoint endpoint, TcpClient client)
@@ -130,6 +133,25 @@ namespace OpenNFS.Client.Internal
                 }
             }
 
+            OpenNfsClientInstrumentation.AdjustPendingCalls(1);
+            try
+            {
+                return await SendAndReceiveCoreAsync(callEnvelope, xid, completion, writeTimeout, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                OpenNfsClientInstrumentation.AdjustPendingCalls(-1);
+            }
+        }
+
+        private async Task<RpcMessageEnvelope> SendAndReceiveCoreAsync(
+            RpcMessageEnvelope callEnvelope,
+            uint xid,
+            TaskCompletionSource<RpcMessageEnvelope> completion,
+            TimeSpan writeTimeout,
+            CancellationToken cancellationToken)
+        {
+
             byte[] framedCall = RecordMarkingCodec.EncodeMessage(RpcMessageCodec.Encode(callEnvelope), 32768);
             long sentTicks;
 
@@ -186,19 +208,22 @@ namespace OpenNFS.Client.Internal
             }
         }
 
-        internal void Retire()
+        internal void Retire(string reason = OpenNfsTelemetryNames.ReasonRetired)
         {
             lock (_stateLock)
             {
-                Interlocked.CompareExchange(ref _state, StateRetiring, StateOpen);
+                if (Interlocked.CompareExchange(ref _state, StateRetiring, StateOpen) == StateOpen)
+                {
+                    _retireReason = reason;
+                }
             }
 
             CloseIfRetiredAndIdle();
         }
 
-        internal void Close()
+        internal void Close(string reason = OpenNfsTelemetryNames.ReasonDisposed)
         {
-            Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was closed by the client."));
+            Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was closed by the client."), reason);
         }
 
         private void CloseIfRetiredAndIdle()
@@ -211,15 +236,18 @@ namespace OpenNFS.Client.Internal
                 }
             }
 
-            Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was retired."));
+            Fail(new IOException("The pooled RPC connection to " + DescribeEndpoint() + " was retired."), Volatile.Read(ref _retireReason));
         }
 
-        private void Fail(Exception exception)
+        private void Fail(Exception exception, string? reason = null)
         {
             if (Interlocked.Exchange(ref _state, StateClosed) == StateClosed)
             {
                 return;
             }
+
+            OpenNfsClientInstrumentation.RecordConnectionClosed(
+                reason ?? (exception is OpenNfsConnectionClosedByPeerException ? OpenNfsTelemetryNames.ReasonPeerClosed : OpenNfsTelemetryNames.ReasonError));
 
             try
             {

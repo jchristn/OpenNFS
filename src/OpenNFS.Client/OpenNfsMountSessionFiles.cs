@@ -5,6 +5,8 @@ namespace OpenNFS.Client
     using System.Threading;
     using System.Threading.Tasks;
     using OpenNFS.Client.Internal;
+    using OpenNFS.Rpc.Telemetry;
+    using OpenNFS.Telemetry;
 
     /// <summary>
     /// Provides path-first file helpers over an <see cref="OpenNfsMountSession"/>.
@@ -33,6 +35,22 @@ namespace OpenNFS.Client
         /// <returns>The full file contents.</returns>
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved or a READ fails.</exception>
         public async Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("ReadAllBytesAsync");
+            try
+            {
+                byte[] result = await ReadAllBytesCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed(OpenNfsTelemetryNames.DirectionRead, result.Length);
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<byte[]> ReadAllBytesCoreAsync(string path, CancellationToken cancellationToken)
         {
             byte[] fileHandle = await _session.ResolvePathHandleOrThrowAsync(path, ReadOperationName, cancellationToken).ConfigureAwait(false);
             OpenNfsMountSessionTransferSizes transferSizes = await _session.GetTransferSizesAsync(cancellationToken).ConfigureAwait(false);
@@ -90,6 +108,22 @@ namespace OpenNFS.Client
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved, identifies a directory, or a READ fails.</exception>
         public async Task<byte[]> ReadAsync(string path, ulong offset, int count, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("ReadAsync");
+            try
+            {
+                byte[] result = await ReadCoreAsync(path, offset, count, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed(OpenNfsTelemetryNames.DirectionRead, result.Length);
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<byte[]> ReadCoreAsync(string path, ulong offset, int count, CancellationToken cancellationToken)
+        {
             if (count < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(count), count, "The requested byte count must be zero or greater.");
@@ -138,6 +172,22 @@ namespace OpenNFS.Client
         /// <exception cref="OpenNfsV3StatusException">Thrown when the path cannot be resolved or identifies a directory.</exception>
         public async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("OpenReadAsync");
+            try
+            {
+                Stream result = await OpenReadCoreAsync(path, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+                return result;
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task<Stream> OpenReadCoreAsync(string path, CancellationToken cancellationToken)
+        {
             OpenNfsMountSessionResolution resolution =
                 await _session.ResolvePathWithAttributesOrThrowAsync(path, ReadOperationName, cancellationToken).ConfigureAwait(false);
             ThrowIfDirectory(resolution.Attributes, ReadOperationName, path);
@@ -168,6 +218,25 @@ namespace OpenNFS.Client
         /// </exception>
         /// <exception cref="OpenNfsClientIoException">Thrown when the server write verifier keeps changing and durability cannot be confirmed.</exception>
         public async Task WriteAllBytesAsync(
+            string path,
+            byte[] data,
+            OpenNfsWriteStability stability,
+            CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("WriteAllBytesAsync");
+            try
+            {
+                await WriteAllBytesCoreAsync(path, data, stability, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed(OpenNfsTelemetryNames.DirectionWrite, data.Length);
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task WriteAllBytesCoreAsync(
             string path,
             byte[] data,
             OpenNfsWriteStability stability,
@@ -226,6 +295,26 @@ namespace OpenNFS.Client
             OpenNfsWriteStability stability,
             CancellationToken cancellationToken)
         {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("WriteAsync");
+            try
+            {
+                await WriteCoreAsync(path, source, length, stability, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed(OpenNfsTelemetryNames.DirectionWrite, length ?? 0);
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task WriteCoreAsync(
+            string path,
+            Stream source,
+            long? length,
+            OpenNfsWriteStability stability,
+            CancellationToken cancellationToken)
+        {
             ArgumentNullException.ThrowIfNull(source);
 
             if (length.HasValue && length.Value < 0)
@@ -277,6 +366,21 @@ namespace OpenNFS.Client
         /// <returns>A task that completes when the entry has been renamed.</returns>
         /// <exception cref="OpenNfsV3StatusException">Thrown when either parent cannot be resolved or the server rejects the rename.</exception>
         public async Task RenameAsync(string path, string newPath, CancellationToken cancellationToken)
+        {
+            OpenNfsClientOperation? telemetry = OpenNfsClientInstrumentation.StartSessionOperation("RenameAsync");
+            try
+            {
+                await RenameCoreAsync(path, newPath, cancellationToken).ConfigureAwait(false);
+                telemetry?.Succeed();
+            }
+            catch (Exception exception)
+            {
+                telemetry?.Fail(exception);
+                throw;
+            }
+        }
+
+        private async Task RenameCoreAsync(string path, string newPath, CancellationToken cancellationToken)
         {
             (byte[] ParentHandle, string EntryName) source =
                 await _session.ResolveParentOrThrowAsync(path, RenameOperationName, cancellationToken).ConfigureAwait(false);

@@ -27,5 +27,7 @@ namespace Sample.OpenNfsServer
         public string? KerberosTargetSpn { get; set; }
 
         public string? KerberosKeytab { get; set; }
+
+        public SampleTelemetrySettings? Telemetry { get; set; }
     }
 }

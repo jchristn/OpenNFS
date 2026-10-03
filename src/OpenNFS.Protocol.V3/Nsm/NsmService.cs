@@ -7,6 +7,7 @@ namespace OpenNFS.Protocol.V3.Nsm
     using OpenNFS.Protocol.V3.Generated;
     using OpenNFS.Protocol.V3.Nsm.Callbacks;
     using OpenNFS.Protocol.V3.Server.Procedures;
+    using OpenNFS.Protocol.V3.Telemetry;
     using OpenNFS.Rpc.Generated;
     using OpenNFS.Rpc.RpcMessages;
     using OpenNFS.Rpc.Xdr;
@@ -21,7 +22,7 @@ namespace OpenNFS.Protocol.V3.Nsm
             INsmNotificationDispatcher? notificationDispatcher = null)
         {
             _recoveryCoordinator = recoveryCoordinator ?? new NsmRecoveryCoordinator();
-            _notificationDispatcher = notificationDispatcher ?? NoOpNsmNotificationDispatcher.Instance;
+            _notificationDispatcher = new TelemetryNsmNotificationDispatcher(notificationDispatcher ?? NoOpNsmNotificationDispatcher.Instance);
         }
 
         internal async Task<RpcMessageEnvelope> DispatchAsync(RpcMessageEnvelope request, CancellationToken cancellationToken)
