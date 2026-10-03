@@ -6,7 +6,7 @@ OpenNFS is a native C# implementation effort for ONC RPC and NFS. Current scope,
 
 OpenNFS is an ALPHA repository.
 
-- The current package/version line is `v0.2.0`, but that is not a stability or support claim.
+- The current package/version line is `v0.2.1`, but that is not a stability or support claim.
 - Public APIs, runtime behavior, interoperability coverage, CI workflows, and documentation are all subject to change without notice.
 - Only very limited compatibility testing has been done relative to the eventual support bar. Passing local suites, direct-peer tests, Linux peer checks, or archived subset conformance runs does not imply broad protocol, platform, kernel, or client/server compatibility.
 
@@ -123,6 +123,8 @@ dotnet test src\Test.Nunit\Test.Nunit.csproj -c Release --no-build
 ```
 
 When the local Docker daemon is reachable, the shared runners also execute the Docker-backed `InteropSuites`. When Docker is unavailable, those cases are skipped with an explicit reason instead of failing unrelated validation.
+
+On Linux and macOS, the script-driven cases (release validators, conformance harnesses, the Kerberos probe) need PowerShell 7 as `pwsh` on `PATH`, for example via `dotnet tool install --global PowerShell`. On Apple Silicon, the unfs3 peer image runs under amd64 emulation. Docker Desktop VMs that ship their own `nfsidmap` request-key handler resolve NFSv4 owner strings in the VM rather than in the client container, so `IdMapSuites/LinuxMountedOwnerMappingRoundTrip` sees `nobody:nobody` there; the case needs a Docker kernel whose idmapper falls back to the container's `rpc.idmapd`.
 
 `Test.Automated` is the exhaustive runner. It executes the full shared Touchstone catalog, including Docker-backed interop, packaged-consumer validation, and other heavyweight matrix cases. `Test.Xunit` and `Test.Nunit` are now adapter-smoke projects over the unit-tagged subset of that catalog so the same heavy matrix is not rerun three times.
 

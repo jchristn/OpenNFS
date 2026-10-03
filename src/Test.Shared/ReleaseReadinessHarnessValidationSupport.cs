@@ -208,6 +208,9 @@ namespace Test.Shared
                         | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
                 }
                 await File.WriteAllTextAsync(Path.Combine(connectathonRoot, "general", "test01.t"), tapScript, cancellationToken).ConfigureAwait(false);
+                // The general subset copies general/* onto the mount and runs `sh runtests` there,
+                // matching cthon04, so the subset directory needs its own runtests script.
+                await File.WriteAllTextAsync(Path.Combine(connectathonRoot, "general", "runtests"), cthonRunScript, cancellationToken).ConfigureAwait(false);
 
                 string pynfsEntryPoint = string.Join(
                     "\n",

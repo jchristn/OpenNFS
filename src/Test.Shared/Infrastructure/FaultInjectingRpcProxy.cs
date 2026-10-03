@@ -100,7 +100,14 @@ namespace Test.Shared.Infrastructure
                 connectionTasks = _connectionTasks.ToArray();
             }
 
-            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Connections still open at shutdown end with the cancellation requested above.
+            }
             _cancellationTokenSource.Dispose();
         }
 

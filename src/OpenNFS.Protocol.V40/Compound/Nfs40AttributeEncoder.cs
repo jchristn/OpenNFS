@@ -28,6 +28,7 @@ namespace OpenNFS.Protocol.V40.Compound
             (int)Nfs40Constants.FATTR4_UNIQUE_HANDLES,
             (int)Nfs40Constants.FATTR4_LEASE_TIME,
             (int)Nfs40Constants.FATTR4_RDATTR_ERROR,
+            (int)Nfs40Constants.FATTR4_ACLSUPPORT,
             (int)Nfs40Constants.FATTR4_FILEHANDLE,
             (int)Nfs40Constants.FATTR4_CASE_INSENSITIVE,
             (int)Nfs40Constants.FATTR4_CASE_PRESERVING,
@@ -142,13 +143,10 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsGetAclResponse? aclResponse = null;
-            if (ContainsAclAttributes(requestedAttributeIds))
+            // FATTR4_ACL is only advertised when the host has an ACL capability (the support check above rejects
+            // it otherwise); FATTR4_ACLSUPPORT is always advertised and reports no ACL types without one.
+            if (ContainsAclAttributes(requestedAttributeIds) && server.Capabilities.Acls is not null)
             {
-                if (server.Capabilities.Acls is null)
-                {
-                    return new TryCreateAttributesResult(null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
-                }
-
                 aclResponse =
                     await server.Capabilities.TrackedAcls!.GetAclAsync(
                         new NfsGetAclRequest(
@@ -509,7 +507,6 @@ namespace OpenNFS.Protocol.V40.Compound
             if (includeAclAttributes)
             {
                 supportedAttributeIds.Add((int)Nfs40Constants.FATTR4_ACL);
-                supportedAttributeIds.Add((int)Nfs40Constants.FATTR4_ACLSUPPORT);
             }
 
             if (includeIdentityAttributes)

@@ -200,19 +200,36 @@ public static class Program
             throw new InvalidOperationException("Expected SETCLIENTID_CONFIRM to succeed for the packaged client NFSv4.0 flow.");
         }
 
-        OpenNfsV40OpenResult createAndOpen = await client.Files.CreateAndOpenV40Async(
-            exportRootHandle,
-            setClientId.ClientId,
-            "owner-" + exportLeafName,
-            createdFileName,
-            OpenNfsV40ShareAccess.Both,
-            OpenNfsV40ShareDeny.None,
-            1,
-            true,
-            cancellationToken).ConfigureAwait(false);
+        // A freshly started Linux NFSv4.0 server rejects OPEN with NFS4ERR_GRACE until its startup
+        // grace period ends, so retry while it reports GRACE or DELAY. Each attempt uses a fresh
+        // open-owner so the sequence ids below always start from a known value.
+        OpenNfsV40OpenResult createAndOpen;
+        DateTimeOffset graceDeadline = DateTimeOffset.UtcNow.AddSeconds(120);
+        for (int attempt = 0; ; attempt++)
+        {
+            createAndOpen = await client.Files.CreateAndOpenV40Async(
+                exportRootHandle,
+                setClientId.ClientId,
+                "owner-" + exportLeafName + "-" + attempt,
+                createdFileName,
+                OpenNfsV40ShareAccess.Both,
+                OpenNfsV40ShareDeny.None,
+                1,
+                true,
+                cancellationToken).ConfigureAwait(false);
+            if (createAndOpen.IsSuccess
+                || (createAndOpen.Status != OpenNfsV40Status.Grace && createAndOpen.Status != OpenNfsV40Status.Delay)
+                || DateTimeOffset.UtcNow >= graceDeadline)
+            {
+                break;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+        }
+
         if (!createAndOpen.IsSuccess || createAndOpen.StateId is null)
         {
-            throw new InvalidOperationException("Expected NFSv4.0 create-through-open to succeed for the packaged client.");
+            throw new InvalidOperationException("Expected NFSv4.0 create-through-open to succeed for the packaged client (status " + createAndOpen.Status + ").");
         }
 
         OpenNfsV40StateId stateId;

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.2.1
+
+This `v0.2.1` line is still an alpha baseline, not a stability or support claim. No public API signature or package dependency of `OpenNFS.Server` or `OpenNFS.Client` changed.
+
+### Fixed
+
+- NFSv4.0 `GETATTR` (and `READDIR` attribute requests) failed the whole request with `NFS4ERR_ATTRNOTSUPP` when the client asked for `aclsupport` and the host had no ACL capability. Current Linux kernels (7.x) always include `aclsupport` in the capability probe they send while mounting, so `mount -t nfs4 -o vers=4.0` failed with `EIO` against any OpenNFS server without `UseAcls(...)`. `aclsupport` is now always advertised in `supported_attrs` and reports `0` (no ACL types) when the host has no ACL capability, as RFC 7530 allows; the `acl` attribute itself is still only advertised, and still `NFS4ERR_ATTRNOTSUPP`, without one.
+- `OpenNfsTcpNfs41ServerHost` (the protocol-level NFSv4.1 TCP host in `OpenNFS.Protocol.V41`) threw `OperationCanceledException` from `DisposeAsync` when a client connection was still open, and an idle connection hitting the 60-second read timeout ended with an unobserved `TimeoutException`. Shutdown now completes cleanly and idle connections close quietly, matching the NFSv3, NFSv4.0, and server-side NFSv4.1/4.2 hosts.
+
+### Changed: test tooling dependencies
+
+- `Touchstone.Core`, `Touchstone.Cli`, `Touchstone.XunitAdapter`, and `Touchstone.NunitAdapter` 0.1.12 -> 0.2.1.
+- `NUnit` 4.6.1 -> 5.0.0, `NUnit.Analyzers` 4.14.0 -> 4.15.0, `NUnit3TestAdapter` 6.2.0 -> 6.3.0.
+- `Microsoft.NET.Test.Sdk` 18.9.0 -> 18.10.1, `coverlet.collector` 10.0.1 -> 10.1.0.
+- On the updated versions, the xUnit and NUnit adapter-smoke projects pass (242/242 on `net8.0` and `net10.0`) and the full Touchstone catalog passes 370 of 371 cases on both frameworks with nothing skipped, including the live-KDC Kerberos cases. The remaining case, `IdMapSuites/LinuxMountedOwnerMappingRoundTrip`, depends on the Docker kernel's NFSv4 idmapper (see the README test notes) and is not affected by this release.
+
+### Fixed: tests and test harness
+
+- New regression cases: `NfsV40Suites/AclSupportReportsNoneWithoutAclCapability` (the exact Linux capability-probe bitmap succeeds without ACLs, `aclsupport` is `0`, `acl` stays `NFS4ERR_ATTRNOTSUPP`) and `NfsV41Suites/TcpHostDisposesCleanlyWithOpenClientConnection`.
+- `InteropSuites/LinuxKernelClientMountsOpenNfsServerOverNfs40` registers an in-memory `INfsAttributeMutation` (`DictionaryNfsAttributeMutation`) on its in-process server, because the Linux kernel client always sends `mode` (and `size` on `O_TRUNC`) with NFSv4.0 OPEN create, which hosts without that capability reject with `NFS4ERR_ATTRNOTSUPP` by design. Other tests that share the fixture keep the capability absent.
+- The live-KDC Kerberos cases (`SecuritySuites/Krb5ReadWrite`, `Krb5iDetectsTamper`, `Krb5pEncryptsPayload`, `RpcSecGssContextEstablishment`, `RpcSecGssIntegrityFailureRejected`) launched `Run-Probe.ps1` with a hard-coded `powershell.exe`, so they could only run on Windows. They now go through `PowerShellCli` (`pwsh` from `PATH`, or Windows PowerShell on Windows), like the other script-driven cases.
+- `FaultInjectingRpcProxy.DisposeAsync` tolerates the shutdown cancellation of connections that are still open (the same race as the NFSv4.1 host above).
+- The two `ServerSurfaceSuites` packed-server consumer programs now enable NFSv4.1/4.2 on ephemeral ports and print `nfs41Port`/`nfs42Port` in their `READY` line, which the readiness parser requires; they previously always timed out.
+- The packaged `OpenNFS.Client` peer-matrix consumer now retries NFSv4.0 create-through-open while a freshly started Linux server (knfsd, nfs-ganesha) still answers `NFS4ERR_GRACE` or `NFS4ERR_DELAY` (bounded to 120 seconds, a fresh open-owner per attempt), matching the in-repo interop suites. Its failure message now includes the returned status.
+- The synthetic Connectathon fixture used by the conformance-harness case now includes `general/runtests`, which the `general` subset command runs from the mounted test directory (as cthon04 does).
+- The unfs3 interop image pins `--platform=linux/amd64`, because the pinned `nimbix/unfs3` digest is amd64-only; it now builds on arm64 Docker hosts (Apple Silicon) under emulation.
+
 ## v0.2.0
 
 This `v0.2.0` line is still an alpha baseline, not a stability or support claim. All changes are additive; no existing public signature changed and the packages take no new dependency.

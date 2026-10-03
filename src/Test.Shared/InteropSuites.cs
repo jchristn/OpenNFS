@@ -2645,7 +2645,8 @@ namespace Test.Shared
             OpenNfsServer server = await CreateOpenNfsV40InteropServerAsync(
                 cancellationToken,
                 includeAcls: false,
-                includeDelegations: false).ConfigureAwait(false);
+                includeDelegations: false,
+                includeAttributeMutation: true).ConfigureAwait(false);
 
             await using OpenNfsTcpNfs40ServerHost host = OpenNfsTcpNfs40ServerHost.Start(
                 server,
@@ -2853,7 +2854,8 @@ namespace Test.Shared
         private static async Task<OpenNfsServer> CreateOpenNfsV40InteropServerAsync(
             CancellationToken cancellationToken,
             bool includeAcls,
-            bool includeDelegations)
+            bool includeDelegations,
+            bool includeAttributeMutation = false)
         {
             CapabilityAwareDictionaryNfsFileSystem fileSystem = new CapabilityAwareDictionaryNfsFileSystem(
                 new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
@@ -2900,6 +2902,11 @@ namespace Test.Shared
                                     "EVERYONE@"),
                             },
                         }));
+            }
+
+            if (includeAttributeMutation)
+            {
+                builder.UseAttributeMutation(new DictionaryNfsAttributeMutation(fileSystem));
             }
 
             if (includeDelegations)

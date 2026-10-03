@@ -101,7 +101,15 @@ namespace OpenNFS.Protocol.V41.Hosting
                 activeConnectionTasks = connectionTasks.ToArray();
             }
 
-            await Task.WhenAll(activeConnectionTasks).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(activeConnectionTasks).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Connections that were still open when the host stopped end with cancellation or transport errors;
+                // those per-connection outcomes must not fail the shutdown itself.
+            }
             cancellationTokenSource.Dispose();
             OpenNfsServerInstrumentation.ListenerStopped(OpenNfsTelemetryNames.ListenerNfs41);
         }
@@ -220,6 +228,11 @@ namespace OpenNFS.Protocol.V41.Hosting
                         catch (IOException)
                         {
                             closeReason = OpenNfsTelemetryNames.ReasonIoError;
+                            break;
+                        }
+                        catch (TimeoutException)
+                        {
+                            closeReason = OpenNfsTelemetryNames.ReasonIdleTimeout;
                             break;
                         }
 

@@ -23,6 +23,7 @@ namespace OpenNFS.Protocol.V40.Compound
             (int)Nfs40Constants.FATTR4_UNIQUE_HANDLES,
             (int)Nfs40Constants.FATTR4_LEASE_TIME,
             (int)Nfs40Constants.FATTR4_RDATTR_ERROR,
+            (int)Nfs40Constants.FATTR4_ACLSUPPORT,
             (int)Nfs40Constants.FATTR4_FILEHANDLE,
             (int)Nfs40Constants.FATTR4_CASE_INSENSITIVE,
             (int)Nfs40Constants.FATTR4_CASE_PRESERVING,
@@ -70,7 +71,6 @@ namespace OpenNFS.Protocol.V40.Compound
             if (includeAclAttributes)
             {
                 supportedAttributeIds.Add((int)Nfs40Constants.FATTR4_ACL);
-                supportedAttributeIds.Add((int)Nfs40Constants.FATTR4_ACLSUPPORT);
             }
 
             if (includeIdentityAttributes)

@@ -1097,6 +1097,119 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV40Suites",
+                        caseId: "AclSupportReportsNoneWithoutAclCapability",
+                        displayName: "NFSv4.0 GETATTR answers the Linux capability probe with aclsupport=0 when the host has no ACL capability",
+                        tags: new List<string> { TestCategories.Unit, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            DictionaryNfsFileSystem fileSystem = new DictionaryNfsFileSystem(
+                                new Dictionary<string, NfsPathKind>(StringComparer.OrdinalIgnoreCase)
+                                {
+                                    [@"C:\exports"] = NfsPathKind.Directory,
+                                },
+                                new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase));
+
+                            OpenNfsServer server = new OpenNfsServerBuilder()
+                                .UseFileSystem(fileSystem)
+                                .AddExport("/", @"C:\exports")
+                                .Build();
+
+                            Nfs40CompoundService service = new Nfs40CompoundService(server);
+                            NfsFileHandle rootHandle = await server.CreateFileHandleAsync(
+                                new NfsFileHandleTarget("/", @"C:\exports"),
+                                cancellationToken).ConfigureAwait(false);
+
+                            // The bitmap Linux 7.x sends from nfs4_server_capabilities during mount.
+                            RpcMessageEnvelope probeReply = await service.DispatchAsync(
+                                CreateCompoundCall(
+                                    0x7001000D,
+                                    "acl-support-probe",
+                                    0U,
+                                    new[]
+                                    {
+                                        CreatePutFileHandleArgop(rootHandle),
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_GETATTR,
+                                            opgetattr = new GETATTR4args
+                                            {
+                                                attr_request = Nfs40AttributeEncoder.CreateBitmap(
+                                                    (int)Nfs40Constants.FATTR4_SUPPORTED_ATTRS,
+                                                    (int)Nfs40Constants.FATTR4_FH_EXPIRE_TYPE,
+                                                    (int)Nfs40Constants.FATTR4_LINK_SUPPORT,
+                                                    (int)Nfs40Constants.FATTR4_SYMLINK_SUPPORT,
+                                                    (int)Nfs40Constants.FATTR4_ACLSUPPORT,
+                                                    (int)Nfs40Constants.FATTR4_CASE_INSENSITIVE,
+                                                    (int)Nfs40Constants.FATTR4_CASE_PRESERVING),
+                                            },
+                                        },
+                                    }),
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res probeResult = ReadCompoundReply(probeReply);
+                            if (probeResult.status != nfsstat4.NFS4_OK)
+                            {
+                                throw new InvalidOperationException(
+                                    "Expected the Linux capability-probe GETATTR to succeed without an ACL capability, but it returned " + probeResult.status + ".");
+                            }
+
+                            RpcMessageEnvelope aclSupportReply = await service.DispatchAsync(
+                                CreateCompoundCall(
+                                    0x7001000E,
+                                    "acl-support-none",
+                                    0U,
+                                    new[]
+                                    {
+                                        CreatePutFileHandleArgop(rootHandle),
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_GETATTR,
+                                            opgetattr = new GETATTR4args
+                                            {
+                                                attr_request = Nfs40AttributeEncoder.CreateBitmap((int)Nfs40Constants.FATTR4_ACLSUPPORT),
+                                            },
+                                        },
+                                    }),
+                                cancellationToken).ConfigureAwait(false);
+
+                            COMPOUND4res aclSupportResult = ReadCompoundReply(aclSupportReply);
+                            GETATTR4resok aclSupportResok = aclSupportResult.resarray?[1].opgetattr?.resok4
+                                ?? throw new InvalidOperationException("Expected GETATTR to return an aclsupport payload.");
+                            XdrReader aclSupportReader = new XdrReader(aclSupportResok.obj_attributes?.attr_vals?.Value ?? Array.Empty<byte>());
+                            fattr4_aclsupport aclSupport = fattr4_aclsupport.ReadFrom(aclSupportReader);
+                            aclSupportReader.EnsureFullyConsumed();
+                            if (aclSupportResult.status != nfsstat4.NFS4_OK || aclSupport.Value != 0U)
+                            {
+                                throw new InvalidOperationException("Expected aclsupport to report no ACL types when the host has no ACL capability.");
+                            }
+
+                            RpcMessageEnvelope aclReply = await service.DispatchAsync(
+                                CreateCompoundCall(
+                                    0x7001000C,
+                                    "acl-unsupported",
+                                    0U,
+                                    new[]
+                                    {
+                                        CreatePutFileHandleArgop(rootHandle),
+                                        new nfs_argop4
+                                        {
+                                            argop = nfs_opnum4.OP_GETATTR,
+                                            opgetattr = new GETATTR4args
+                                            {
+                                                attr_request = Nfs40AttributeEncoder.CreateBitmap((int)Nfs40Constants.FATTR4_ACL),
+                                            },
+                                        },
+                                    }),
+                                cancellationToken).ConfigureAwait(false);
+
+                            if (ReadCompoundReply(aclReply).status != nfsstat4.NFS4ERR_ATTRNOTSUPP)
+                            {
+                                throw new InvalidOperationException("Expected GETATTR for the acl attribute to stay ATTRNOTSUPP when the host has no ACL capability.");
+                            }
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV40Suites",
                         caseId: "AclGetSetRoundTripPositive",
                         displayName: "NFSv4.0 COMPOUND round-trips ACL support and ACL replacement over GETATTR and SETATTR",
                         tags: new List<string> { TestCategories.Unit, TestCategories.Automated },

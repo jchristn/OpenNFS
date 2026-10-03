@@ -1013,15 +1013,19 @@ public static class Program
                     new OpenNfsServerApplicationOptions
                     {
                         ListenerAddress = "127.0.0.1",
+                        EnableNfs41 = true,
+                        EnableNfs42 = true,
                         MountPort = 0,
                         NfsPort = 0,
                         Nfs40Port = 0,
+                        Nfs41Port = 0,
+                        Nfs42Port = 0,
                         NlmPort = 0,
                         NsmPort = 0,
                     });
 
             await application.StartAsync().ConfigureAwait(false);
-            Console.WriteLine("READY mountPort=" + application.MountPort + " nfsPort=" + application.NfsPort + " nfs40Port=" + application.Nfs40Port + " exportPath=/data");
+            Console.WriteLine("READY mountPort=" + application.MountPort + " nfsPort=" + application.NfsPort + " nfs40Port=" + application.Nfs40Port + " nfs41Port=" + application.Nfs41Port + " nfs42Port=" + application.Nfs42Port + " exportPath=/data");
             await Console.In.ReadLineAsync().ConfigureAwait(false);
             return 0;
         }
@@ -1114,15 +1118,19 @@ public static class Program
                     new OpenNfsServerApplicationOptions
                     {
                         ListenerAddress = "127.0.0.1",
+                        EnableNfs41 = true,
+                        EnableNfs42 = true,
                         MountPort = 0,
                         NfsPort = 0,
                         Nfs40Port = 0,
+                        Nfs41Port = 0,
+                        Nfs42Port = 0,
                         NlmPort = 0,
                         NsmPort = 0,
                     });
 
             await application.StartAsync().ConfigureAwait(false);
-            Console.WriteLine("READY mountPort=" + application.MountPort + " nfsPort=" + application.NfsPort + " nfs40Port=" + application.Nfs40Port + " exportPath=/data");
+            Console.WriteLine("READY mountPort=" + application.MountPort + " nfsPort=" + application.NfsPort + " nfs40Port=" + application.Nfs40Port + " nfs41Port=" + application.Nfs41Port + " nfs42Port=" + application.Nfs42Port + " exportPath=/data");
             await Console.In.ReadLineAsync().ConfigureAwait(false);
             return 0;
         }

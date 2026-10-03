@@ -227,6 +227,41 @@ namespace Test.Shared.Infrastructure
                     request.Stability));
         }
 
+        /// <summary>
+        /// Applies an attribute update in memory: size truncates or zero-extends file contents; mode, ownership, and
+        /// timestamps are accepted and ignored. Exposed through <see cref="DictionaryNfsAttributeMutation"/> only for hosts that
+        /// opt in, so the file system itself keeps not advertising <c>INfsAttributeMutation</c>.
+        /// </summary>
+        internal Task<NfsSetAttributesResponse> SetAttributesAsync(NfsSetAttributesRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            request.CancellationToken.ThrowIfCancellationRequested();
+
+            NfsPathInfo currentPathInfo = GetPathInfo(request.SourcePath);
+            if (!currentPathInfo.Exists)
+            {
+                throw new FileNotFoundException("The path does not exist.", request.SourcePath);
+            }
+
+            if (request.Size.HasValue)
+            {
+                if (currentPathInfo.Kind != NfsPathKind.File)
+                {
+                    throw new ArgumentException("Only files can be resized.", nameof(request));
+                }
+
+                byte[] existingFileContents = _FileContents.TryGetValue(request.SourcePath, out byte[]? fileContents)
+                    ? fileContents
+                    : Array.Empty<byte>();
+                byte[] resizedFileContents = new byte[checked((int)request.Size.Value)];
+                Array.Copy(existingFileContents, resizedFileContents, Math.Min(existingFileContents.Length, resizedFileContents.Length));
+                _FileContents[request.SourcePath] = resizedFileContents;
+                TouchPath(request.SourcePath);
+            }
+
+            return Task.FromResult(new NfsSetAttributesResponse(GetPathInfo(request.SourcePath)));
+        }
+
         public Task<NfsCommitFileResponse> CommitFileAsync(NfsCommitFileRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);

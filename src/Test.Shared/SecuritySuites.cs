@@ -2,7 +2,6 @@ namespace Test.Shared
 {
     using System;
     using System.Collections.Generic;
-    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -660,32 +659,21 @@ namespace Test.Shared
                 throw new InvalidOperationException("Run-Probe.ps1 not found at " + runProbeScript);
             }
 
-            ProcessStartInfo startInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                ArgumentList =
-                {
-                    "-ExecutionPolicy", "Bypass",
-                    "-NoProfile",
-                    "-File", runProbeScript,
-                },
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            };
-
-            using Process process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Failed to start powershell.exe for the Kerberos probe.");
-            string stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            string stderr = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            // PowerShellCli resolves pwsh (or Windows PowerShell on Windows) from PATH, so the probe also runs on Linux and macOS.
+            PowerShellCommandResult probeResult = await PowerShellCli.RunScriptAsync(
+                runProbeScript,
+                Array.Empty<string>(),
+                repositoryRoot,
+                cancellationToken,
+                timeout: TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+            string stdout = probeResult.StandardOutput;
+            string stderr = probeResult.StandardError;
 
             string combined = stdout + Environment.NewLine + stderr;
-            if (process.ExitCode != 0)
+            if (probeResult.ExitCode != 0)
             {
                 throw new InvalidOperationException(
-                    "Kerberos probe failed (exit " + process.ExitCode + "). Combined output:" + Environment.NewLine + combined);
+                    "Kerberos probe failed (exit " + probeResult.ExitCode + "). Combined output:" + Environment.NewLine + combined);
             }
 
             for (int index = 0; index < expectedMarkers.Count; index++)

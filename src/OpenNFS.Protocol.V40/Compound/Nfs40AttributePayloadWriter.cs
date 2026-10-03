@@ -51,13 +51,10 @@ namespace OpenNFS.Protocol.V40.Compound
             }
 
             NfsGetAclResponse? aclResponse = null;
-            if (ContainsAclAttributes(requestedAttributeIds))
+            // FATTR4_ACL is only advertised when the host has an ACL capability (the support check above rejects
+            // it otherwise); FATTR4_ACLSUPPORT is always advertised and reports no ACL types without one.
+            if (ContainsAclAttributes(requestedAttributeIds) && server.Capabilities.Acls is not null)
             {
-                if (server.Capabilities.Acls is null)
-                {
-                    return new TryCreateAttributesResult(null, nfsstat4.NFS4ERR_ATTRNOTSUPP);
-                }
-
                 aclResponse =
                     await server.Capabilities.TrackedAcls!.GetAclAsync(
                         new NfsGetAclRequest(

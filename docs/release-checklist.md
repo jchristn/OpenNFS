@@ -15,7 +15,7 @@ Use this checklist before any branch claims that a protocol version or security 
 
 ## Package and sample gates
 
-- The package version in `src/Directory.Build.props` matches the `CHANGELOG.md` heading being released (currently `0.1.1`).
+- The package version in `src/Directory.Build.props` matches the `CHANGELOG.md` heading being released (currently `0.2.1`).
 - `dotnet pack` of both public packages into `artifacts/nuget-<version>` produces a `.nupkg` and `.snupkg` per package whose nuspec carries the `MIT` license expression, `README.md`, and the `https://github.com/jchristn/OpenNFS` repository URL, and whose `lib/` folders carry the bundled internal assemblies with XML docs (PDBs in the `.snupkg`).
 - A clean console app outside the repository restores both packages from that folder and runs an in-process `OpenNfsServerApplication` plus the mounted-session client APIs.
 - `dotnet pack src/OpenNFS.Server/OpenNFS.Server.csproj -c Release` produces `.nupkg` and `.snupkg`.

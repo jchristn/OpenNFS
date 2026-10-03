@@ -451,6 +451,43 @@ namespace Test.Shared
 
                     new TestCaseDescriptor(
                         suiteId: "NfsV41Suites",
+                        caseId: "TcpHostDisposesCleanlyWithOpenClientConnection",
+                        displayName: "Real TCP host DisposeAsync completes without throwing while a client connection is still open",
+                        tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
+                        executeAsync: async cancellationToken =>
+                        {
+                            OpenNfsTcpNfs41ServerHost host = OpenNfsTcpNfs41ServerHost.Start(
+                                CreateProcessor(),
+                                listenerAddress: "127.0.0.1",
+                                nfsPort: 0);
+
+                            using TcpClient tcpClient = new TcpClient();
+                            await tcpClient.ConnectAsync("127.0.0.1", host.NfsPort, cancellationToken).ConfigureAwait(false);
+                            using NetworkStream stream = tcpClient.GetStream();
+                            RpcTcpTransport transport = new RpcTcpTransport(
+                                stream,
+                                new RpcTransportOptions(timeouts: new RpcTransportTimeouts(
+                                    readTimeout: TimeSpan.FromSeconds(15),
+                                    writeTimeout: TimeSpan.FromSeconds(15))));
+
+                            // A completed round trip guarantees the host is blocked reading this connection.
+                            COMPOUND4args exchangeId = new COMPOUND4args
+                            {
+                                tag = MakeTag("open-conn-dispose"),
+                                minorversion = 1,
+                                argarray = new[]
+                                {
+                                    new nfs_argop4 { argop = nfs_opnum4.OP_EXCHANGE_ID, opexchange_id = BuildExchangeIdArguments(0xC5, 122) },
+                                },
+                            };
+                            COMPOUND4res exchangeIdResponse = await SendCompoundOverTransportAsync(transport, exchangeId, xid: 1101, cancellationToken).ConfigureAwait(false);
+                            EnsureSuccess(exchangeIdResponse.status, "open-connection EXCHANGE_ID");
+
+                            await host.DisposeAsync().ConfigureAwait(false);
+                        }),
+
+                    new TestCaseDescriptor(
+                        suiteId: "NfsV41Suites",
                         caseId: "ClientSessionEstablishAndCleanTeardown",
                         displayName: "OpenNfsV41ClientSession establishes a session over a real socket and tears it down cleanly",
                         tags: new List<string> { TestCategories.Integration, TestCategories.Automated },
